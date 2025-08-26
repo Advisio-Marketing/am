@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
-import "./Sidebar.css";
+import "./SideBar.css";
 import { FaHome, FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { FaArrowsRotate } from "react-icons/fa6";
 
@@ -97,20 +97,41 @@ function Sidebar({
           {accounts.length === 0 && !searchTerm && (
             <li className="sidebar-empty">Nenalezeny žádné účty.</li>
           )}
-          {accounts.map((account) => (
-            <li
-              key={account.id}
-              className={`sidebar-item ${
-                account.id === selectedAccountId ? "selected-in-sidebar" : ""
-              }`}
-              onClick={() => onSelect(account)}
-              title={`${account.name} - ${account.client_country}`}
-            >
-              <span className="sidebar-item-name">
-                {account.name} - {account.client_country}
-              </span>
-            </li>
-          ))}
+          {accounts.map((item) => {
+            const isSelected = item.group
+              ? item.representative?.id === selectedAccountId
+              : item.id === selectedAccountId;
+            const title = item.group
+              ? item.tooltip || item.name
+              : `${item.name} - ${item.client_country}`;
+            const label = item.group
+              ? item.name
+              : `${item.name} - ${item.client_country}`;
+            const handleClick = () => {
+              if (item.group && item.representative) {
+                onSelect({
+                  id: item.representative.id,
+                  name: item.name, // v záložce zobrazíme e-mail
+                  client_country: item.representative.client_country,
+                  client_email: item.representative.client_email,
+                  tabTitle: item.name,
+                  tabTooltip: item.tooltip,
+                });
+              } else {
+                onSelect(item);
+              }
+            };
+            return (
+              <li
+                key={`${item.group ? `group-${item.name}` : item.id}`}
+                className={`sidebar-item ${isSelected ? "selected-in-sidebar" : ""}`}
+                onClick={handleClick}
+                title={title}
+              >
+                <span className="sidebar-item-name">{label}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
       
@@ -128,6 +149,16 @@ Sidebar.propTypes = {
       id: PropTypes.string.isRequired,
       name: PropTypes.string.isRequired,
       client_country: PropTypes.string,
+      client_email: PropTypes.string,
+      group: PropTypes.bool,
+      representative: PropTypes.shape({
+        id: PropTypes.string,
+        name: PropTypes.string,
+        client_country: PropTypes.string,
+        client_email: PropTypes.string,
+      }),
+      groupAccounts: PropTypes.array,
+      tooltip: PropTypes.string,
     })
   ).isRequired,
   onSelect: PropTypes.func.isRequired,

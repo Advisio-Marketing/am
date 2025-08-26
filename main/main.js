@@ -1,17 +1,18 @@
 // --- Imports ---
 const {
   app,
-  shell,
   BaseWindow,
   WebContentsView,
   session,
   net,
   ipcMain,
-  dialog,
 } = require("electron");
 const path = require("path");
-const { autoUpdater } = require("electron-updater");
+const fs = require("node:fs").promises;
 const log = require("electron-log");
+
+const { getUpdateVersion } = require("./utils/getUpdateVersion");
+const { showStartupDialog } = require("./utils/dialog");
 
 // Google Auth Manager - s error handling
 let GoogleAuthManager = null;
@@ -42,9 +43,9 @@ try {
 
 // --- Konfigurace Logování ---
 try {
-  autoUpdater.logger = log;
-  autoUpdater.logger.transports.file.level = "info";
-  log.transports.file.resolvePath = () =>
+  // nastav přímo electron-log
+  log.transports.file.level = "info";
+  log.transports.file.resolvePathFn = () =>
     path.join(app.getPath("userData"), "logs/main.log");
   log.info(`--- Easy Access Application starting (PID: ${process.pid}) ---`);
   log.info(`App Path: ${app.getAppPath()}`);
@@ -65,6 +66,7 @@ let SIDEBAR_WIDTH = 250;
 let TAB_BAR_HEIGHT = 40;
 let isMainLayoutActive = false; // Začínáme s úvodní obrazovkou
 let googleAuthManager = null; // Google OAuth manager
+let hasShownUpdateDialog = false;
 
 // --- Statické Consent Cookies ---
 const consentCookies = {
@@ -77,7 +79,8 @@ const consentCookies = {
 // -----------------------------
 
 // --- API Funkce ---
-async function fetchAccountList() {
+
+async function fetchAccountListHeureka() {
   log.info("Attempting to fetch account list from API...");
   const requestUrl = "https://app.advisio.cz/api/system-list/heureka/";
   const requestOptions = { method: "GET", url: requestUrl, timeout: 15000 };
@@ -99,6 +102,7 @@ async function fetchAccountList() {
       response.on("end", () => {
         log.info("API account list response finished.");
         log.debug("Raw account list response body:", body);
+        fs.writeFile("accounts.json", body, "utf-8");
         try {
           const jsonData = JSON.parse(body);
           if (Array.isArray(jsonData)) {
@@ -252,10 +256,25 @@ async function createWindow() {
   });
   mainWindow.contentView.addChildView(reactUiView);
   log.info("React UI WebContentsView added.");
+  function cmpSemver(a, b) {
+    const A = String(a)
+      .split(".")
+      .map((n) => parseInt(n, 10) || 0);
+    const B = String(b)
+      .split(".")
+      .map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(A.length, B.length); i++) {
+      const da = A[i] || 0,
+        db = B[i] || 0;
+      if (da > db) return 1;
+      if (da < db) return -1;
+    }
+    return 0;
+  }
+
   reactUiView.webContents.on("did-finish-load", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
-      log.info("Main window shown (after did-finish-load).");
       updateMainLayout();
     }
   });
@@ -333,14 +352,51 @@ function showView(accountId) {
 ipcMain.handle("google-auth", async () => {
   log.info("IPC: Google authentication requested.");
   try {
-    if (!GoogleAuthManager) {
-      throw new Error("GoogleAuthManager not available");
-    }
-    if (!googleAuthManager) {
-      googleAuthManager = new GoogleAuthManager();
-    }
+    if (!GoogleAuthManager) throw new Error("GoogleAuthManager not available");
+    if (!googleAuthManager) googleAuthManager = new GoogleAuthManager();
+
     const result = await googleAuthManager.getAuthenticatedClient();
     log.info("Google authentication successful:", result.userInfo.email);
+
+    // <<< NAVÁZÁNO NA ÚSPĚŠNÝ LOGIN >>>
+    try {
+      if (!hasShownUpdateDialog && mainWindow && !mainWindow.isDestroyed()) {
+        const current = app.getVersion();
+        const latest = await getUpdateVersion(); // může být null
+
+        if (latest && typeof latest === "string") {
+          const isNewer = (function cmp(a, b) {
+            const A = String(a)
+              .split(".")
+              .map((n) => parseInt(n, 10) || 0);
+            const B = String(b)
+              .split(".")
+              .map((n) => parseInt(n, 10) || 0);
+            for (let i = 0; i < Math.max(A.length, B.length); i++) {
+              const da = A[i] || 0,
+                db = B[i] || 0;
+              if (da > db) return true;
+              if (da < db) return false;
+            }
+            return false;
+          })(latest, current);
+
+          if (isNewer) {
+            hasShownUpdateDialog = true;
+            showStartupDialog(mainWindow, latest);
+          } else {
+            log.info(
+              `APP UP TO DATE after login (current=${current}, latest=${latest})`
+            );
+          }
+        } else {
+          log.warn("getUpdateVersion returned null/invalid after login.");
+        }
+      }
+    } catch (e) {
+      log.error("Post-login update check failed:", e);
+    }
+
     return { success: true, userInfo: result.userInfo };
   } catch (error) {
     log.error("IPC: Google authentication failed:", error);
@@ -362,14 +418,14 @@ ipcMain.handle("google-logout", async () => {
   }
 });
 
-ipcMain.handle("fetch-account-list", async () => {
+ipcMain.handle("fetch-account-list-heureka", async () => {
   log.info("IPC: React UI requested account list fetch.");
   if (accountList !== null) {
     log.info("Returning cached account list.");
     return accountList;
   }
   try {
-    const fetchedList = await fetchAccountList();
+    const fetchedList = await fetchAccountListHeureka();
     accountList = fetchedList || [];
     return accountList;
   } catch (error) {
@@ -709,13 +765,12 @@ ipcMain.handle("close-tab", async (_event, accountId) => {
 });
 // -----------------------------
 
-// --- Application Lifecycle & Auto Update ---
+// --- Application Lifecycle ---
 app.whenReady().then(async () => {
   log.info("App is ready.");
   createWindow().catch((error) => {
     log.error("Unhandled error during createWindow execution:", error);
   });
-  // autoUpdater.checkForUpdatesAndNotify();
 });
 
 app.on("activate", () => {

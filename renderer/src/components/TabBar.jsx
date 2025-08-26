@@ -36,15 +36,15 @@ function TabBar({ tabs, activeTabId, onSwitchTab, onCloseTab, height, onReorderT
           onDragOver={(e) => handleDragOver(e, tab.id)}
           onDrop={(e) => handleDrop(e, tab.id)}
           draggable
-          title={tab.error ? `Chyba: ${tab.error}` : tab.name}
+          title={tab.error ? `Chyba: ${tab.error}` : (tab.tooltip || tab.name)}
         >
-          <span className="tab-item-name">{tab.name}</span>
+          <span className="tab-item-name">{tab.title || tab.name}</span>
           {tab.status === 'loading' && <span className="tab-spinner" title="Načítání..."></span>}
           {tab.status === 'error' && <span className="tab-error-icon" title={`Chyba: ${tab.error}`}>⚠️</span>}
           <button
             className="close-tab-btn"
             onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
-            title={`Zavřít ${tab.name}`}
+            title={`Zavřít ${tab.title || tab.name}`}
           >
             &times;
           </button>
@@ -58,6 +58,8 @@ TabBar.propTypes = {
   tabs: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string.isRequired,
     name: PropTypes.string.isRequired,
+  title: PropTypes.string,
+  tooltip: PropTypes.string,
     status: PropTypes.oneOf(['loading', 'ready', 'error']).isRequired,
     error: PropTypes.string,
   })).isRequired,

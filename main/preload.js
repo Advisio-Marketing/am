@@ -8,7 +8,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   googleAuth: () => ipcRenderer.invoke("google-auth"),
 
   // Po kliknutí na úvodní tlačítko
-  fetchAccountList: () => ipcRenderer.invoke("fetch-account-list"),
+  fetchAccountListHeureka: () =>
+    ipcRenderer.invoke("fetch-account-list-heureka"),
   showMainLayout: () => ipcRenderer.invoke("show-main-layout"),
 
   // Po kliknutí v sidebaru

@@ -31,7 +31,7 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isResizing) return;
-      
+
       if (isSidebarCollapsed && e.clientX > 50) {
         setIsSidebarCollapsed(false);
         const newWidth = Math.max(e.clientX, MIN_SIDEBAR_WIDTH);
@@ -39,7 +39,7 @@ function App() {
         window.electronAPI.updateSidebarWidth(newWidth);
         return;
       }
-      
+
       if (!isSidebarCollapsed) {
         const newWidth = Math.min(
           Math.max(e.clientX, MIN_SIDEBAR_WIDTH),
@@ -47,7 +47,7 @@ function App() {
         );
         setSidebarWidth(newWidth);
         window.electronAPI.updateSidebarWidth(newWidth);
-        
+
         if (e.clientX < MIN_SIDEBAR_WIDTH / 2) {
           setIsSidebarCollapsed(true);
         }
@@ -56,11 +56,11 @@ function App() {
 
     const stopResizing = () => {
       setIsResizing(false);
-      document.body.classList.remove('no-select');
+      document.body.classList.remove("no-select");
     };
 
     if (isResizing) {
-      document.body.classList.add('no-select');
+      document.body.classList.add("no-select");
     }
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -69,7 +69,7 @@ function App() {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", stopResizing);
-      document.body.classList.remove('no-select');
+      document.body.classList.remove("no-select");
     };
   }, [isResizing, isSidebarCollapsed]);
 
@@ -131,38 +131,47 @@ function App() {
     setViewMode("initial");
   }, []);
 
-  const handleInitialButtonClick = useCallback(async (accountName) => {
-    setIsLoadingAccounts(true);
-    setErrorLoadingAccounts(null);
-    try {
-      await window.electronAPI.showMainLayout();
-      const list = await window.electronAPI.fetchAccountList();
-      if (Array.isArray(list)) {
-        const formattedList = list.map((item) => ({
-          id: String(item.id),
-          name: item.client_name || `Účet ${item.id}`,
-          client_country: item?.client_country,
-        }));
-        setAccounts(formattedList);
-        setViewMode("main");
-        
-        window.electronAPI.updateSidebarWidth(sidebarWidth);
-        
-        const clickedAccount = formattedList.find((acc) =>
-          acc.name.includes(accountName)
-        );
-        if (clickedAccount) {
-          handleSidebarSelect(clickedAccount);
+  const handleInitialButtonClick = useCallback(
+    async (accountName) => {
+      setIsLoadingAccounts(true);
+      setErrorLoadingAccounts(null);
+      try {
+        await window.electronAPI.showMainLayout();
+        if (accountName === "Heureka") {
+          console.log("Heureka");
+          const list = await window.electronAPI.fetchAccountListHeureka();
+          if (Array.isArray(list)) {
+            const formattedList = list.map((item) => ({
+              id: String(item.id),
+              name: item.client_name || `Účet ${item.id}`,
+              client_country: item?.client_country,
+              client_email: item?.client_email || "",
+            }));
+            setAccounts(formattedList);
+            setViewMode("main");
+
+            window.electronAPI.updateSidebarWidth(sidebarWidth);
+
+            const clickedAccount = formattedList.find((acc) =>
+              acc.name.includes(accountName)
+            );
+            if (clickedAccount) {
+              handleSidebarSelect(clickedAccount);
+            }
+          } else {
+            console.log("else");
+          }
+        } else {
+          throw new Error("Neplatná data účtů.");
         }
-      } else {
-        throw new Error("Neplatná data účtů.");
+      } catch (err) {
+        setErrorLoadingAccounts(`Chyba: ${err.message}`);
+      } finally {
+        setIsLoadingAccounts(false);
       }
-    } catch (err) {
-      setErrorLoadingAccounts(`Chyba: ${err.message}`);
-    } finally {
-      setIsLoadingAccounts(false);
-    }
-  }, [sidebarWidth]);
+    },
+    [sidebarWidth]
+  );
 
   const handleToggleCollapse = useCallback(() => {
     if (isSidebarCollapsed) {
@@ -195,6 +204,9 @@ function App() {
           {
             id: account.id,
             name: account.name,
+            // pokud přichází ze skupiny, použijeme e-mail jako titulek záložky
+            title: account.tabTitle || undefined,
+            tooltip: account.tabTooltip || undefined,
             status: "loading",
             error: null,
           },
@@ -288,7 +300,7 @@ function App() {
     setOpenTabs([]);
     setActiveTabId(null);
     setViewMode("login");
-    window.electronAPI.resetToHome().catch(error => {
+    window.electronAPI.resetToHome().catch((error) => {
       console.error("Error during logout reset:", error);
     });
   }, []);
@@ -307,9 +319,9 @@ function App() {
     }
 
     // Okamžitě nastavíme stav záložky na 'loading' pro rychlou vizuální odezvu
-    setOpenTabs(currentTabs =>
-      currentTabs.map(tab =>
-        tab.id === accountId ? { ...tab, status: 'loading', error: null } : tab
+    setOpenTabs((currentTabs) =>
+      currentTabs.map((tab) =>
+        tab.id === accountId ? { ...tab, status: "loading", error: null } : tab
       )
     );
 
@@ -322,18 +334,77 @@ function App() {
     } catch (error) {
       console.error(`Failed to call refresh for tab ${accountId}:`, error);
       // Pokud selže samotné volání, nastavíme chybu
-      setOpenTabs(currentTabs =>
-        currentTabs.map(tab =>
-          tab.id === accountId ? { ...tab, status: 'error', error: error.message } : tab
+      setOpenTabs((currentTabs) =>
+        currentTabs.map((tab) =>
+          tab.id === accountId
+            ? { ...tab, status: "error", error: error.message }
+            : tab
         )
       );
     }
   }, []); // Závislost je prázdná, protože setOpenTabs je stabilní
 
+  // Skupinové zobrazení účtů podle e-mailu: víc účtů pod jedním e-mailem -> jeden řádek s e-mailem
+  const displayAccounts = React.useMemo(() => {
+    const emailMap = new Map();
+    for (const acc of accounts) {
+      const email = (acc.client_email || "").trim().toLowerCase();
+      if (!emailMap.has(email)) emailMap.set(email, []);
+      emailMap.get(email).push(acc);
+    }
 
-  const filteredAccounts = accounts.filter((account) =>
-    account.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    const items = [];
+    for (const [email, list] of emailMap.entries()) {
+      if (list.length > 1 && email) {
+        // víc účtů pod jedním emailem -> skupina
+        // reprezentant: první podle id vzestupně
+        const representative = [...list].sort(
+          (a, b) => Number(a.id) - Number(b.id)
+        )[0];
+        const tooltipNames = list
+          .map(
+            (a) =>
+              `${a.name || `Účet ${a.id}`}${
+                a.client_country ? ` (${a.client_country})` : ""
+              }`
+          )
+          .join(", ");
+        items.push({
+          // pro výběr/id použijeme reprezentanta, aby se otevřel jen jeden
+          id: representative.id,
+          name: email, // v sidebaru zobrazíme e-mail
+          client_country: representative.client_country,
+          client_email: email,
+          group: true,
+          representative,
+          groupAccounts: list,
+          tooltip: tooltipNames,
+        });
+      } else {
+        // jeden účet pro daný email nebo email prázdný -> zobrazíme standardně
+        for (const a of list) {
+          items.push({ ...a, group: false });
+        }
+      }
+    }
+
+    // Filtrování podle vyhledávání: hledáme v názvu účtu i v e-mailu/skupině
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((item) => {
+      if (item.group) {
+        const emailHit = item.name.toLowerCase().includes(term);
+        const namesHit = item.groupAccounts?.some((a) =>
+          (a.name || "").toLowerCase().includes(term)
+        );
+        return emailHit || namesHit;
+      }
+      return (
+        (item.name || "").toLowerCase().includes(term) ||
+        (item.client_email || "").toLowerCase().includes(term)
+      );
+    });
+  }, [accounts, searchTerm]);
 
   const handleDisabled = () => {
     alert("Na této službě se pracuje.");
@@ -356,7 +427,7 @@ function App() {
               <span className="user-name">
                 {userInfo.name} ({userInfo.email})
               </span>
-              <StyledButton 
+              <StyledButton
                 onClick={handleLogout}
                 variant="danger"
                 title="Odhlásit se"
@@ -371,12 +442,12 @@ function App() {
           <div style={{ color: "red", textAlign: "center" }}>
             <p>Chyba při načítání seznamu účtů:</p>
             <p>{errorLoadingAccounts}</p>
-            <button
+            {/* <button
               onClick={() => handleInitialButtonClick("Heureka")}
               style={{ marginTop: "10px" }}
             >
               Zkusit znovu?
-            </button>
+            </button> */}
           </div>
         )}
         {!errorLoadingAccounts && (
@@ -388,8 +459,14 @@ function App() {
               loading={isLoadingAccounts}
             />
             <AccountButton
+              accountName="Mergado"
+              onClick={handleInitialButtonClick}
+              disabled={isLoadingAccounts}
+              loading={isLoadingAccounts}
+            />
+            <AccountButton
               accountName="Glami"
-              onClick={handleDisabled}
+              onClick={handleDisabled}x
               disabled={true}
             />
             <AccountButton
@@ -402,11 +479,6 @@ function App() {
               onClick={handleDisabled}
               disabled={true}
             />
-            <AccountButton
-              accountName="Modio"
-              onClick={handleDisabled}
-              disabled={true}
-            />
           </div>
         )}
       </div>
@@ -416,9 +488,9 @@ function App() {
   const activeTabInfo = openTabs.find((tab) => tab.id === activeTabId);
 
   return (
-    <div className={`app-container-main ${isResizing ? 'resizing' : ''}`}>
+    <div className={`app-container-main ${isResizing ? "resizing" : ""}`}>
       <Sidebar
-        accounts={filteredAccounts}
+        accounts={displayAccounts}
         onSelect={handleSidebarSelect}
         width={sidebarWidth}
         isLoading={isLoadingAccounts}
@@ -433,7 +505,7 @@ function App() {
         isResizing={isResizing}
         onRefresh={handleRefresh}
       />
-      <div className={`main-content-wrapper ${isResizing ? 'resizing' : ''}`}>
+      <div className={`main-content-wrapper ${isResizing ? "resizing" : ""}`}>
         <TabBar
           tabs={openTabs}
           activeTabId={activeTabId}
