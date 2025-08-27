@@ -1,0 +1,53 @@
+.global-top-bar {
+  display: flex;
+  align-items: center;
+  background-color: #333;
+  color: white;
+  height: 40px; /* Same as old TAB_BAR_HEIGHT */
+  padding: 0 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.global-controls {
+  display: flex;
+  align-items: center;
+  margin-right: 10px;
+}
+
+.global-controls button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 16px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.global-controls button:hover {
+  background-color: #555;
+}
+
+.global-controls button:disabled {
+  color: #777;
+  cursor: not-allowed;
+}
+
+.global-controls .spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Make TabBar take the remaining space */
+.global-top-bar .tab-bar-container {
+  flex-grow: 1;
+  height: 100%;
+}

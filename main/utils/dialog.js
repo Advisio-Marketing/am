@@ -9,7 +9,7 @@ async function showStartupDialog(mainWindow, version) {
   log.info("platform", process?.platform);
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: "info",
-    title: "Easy Access update",
+    title: "AM update",
     message: `Je dostupný update aplikace pro verzi ${version}. Pro stažení klikněte na Aktualizovat! Po potvrzení bude aplikace zavřena a je potřeba nainstalovat stažený soubor.`,
     buttons: ["Aktualizovat"],
     cancelId: 1, // pro jistotu

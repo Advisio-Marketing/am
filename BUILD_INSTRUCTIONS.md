@@ -20,7 +20,7 @@ Build se spustí automaticky při:
 #### 2. Manuální spuštění
 
 1. Jdi na GitHub do sekce **Actions**
-2. Vyber workflow **"Build Easy Access"**
+2. Vyber workflow **"Build AM"**
 3. Klikni na **"Run workflow"**
 4. Vyber větev a klikni **"Run workflow"**
 
@@ -28,9 +28,9 @@ Build se spustí automaticky při:
 
 Po dokončení buildu najdeš soubory v sekci **Artifacts**:
 
-- **easy-access-macos** - DMG soubory pro Mac
-- **easy-access-windows** - EXE/ZIP soubory pro Windows
-- **easy-access-linux** - AppImage/DEB soubory pro Linux
+- **am-macos** - DMG soubory pro Mac
+- **am-windows** - EXE/ZIP soubory pro Windows
+- **am-linux** - AppImage/DEB soubory pro Linux
 
 ### Poznámky:
 

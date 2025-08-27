@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
 import "./SideBar.css";
-import { FaHome, FaChevronLeft, FaChevronRight } from "react-icons/fa";
-import { FaArrowsRotate } from "react-icons/fa6";
+import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 
 function Sidebar({
   accounts,
@@ -40,7 +39,10 @@ function Sidebar({
 
   if (isCollapsed) {
     return (
-      <div className="sidebar sidebar-collapsed" style={{ width: '40px', minWidth: '40px' }}>
+      <div
+        className="sidebar sidebar-collapsed"
+        style={{ width: "40px", minWidth: "40px" }}
+      >
         <div className="sidebar-toggle-btn" onClick={onToggleCollapse}>
           <FaChevronRight title="Zobrazit boční panel" />
         </div>
@@ -56,23 +58,14 @@ function Sidebar({
     >
       <div className="heading-box">
         <h2 className="sidebar-title">Účty</h2>
-        <div className="sidebar-controls">
-          <FaHome
-            className="home-btn"
-            onClick={onGoHome}
-            title="Zpět na domovskou obrazovku"
-          />
-          <FaArrowsRotate
-            className={`refresh-btn ${isRefreshing ? "spinning" : ""}`}
-            title="Obnovit aktivní záložku"
-            onClick={handleRefreshClick}
-          />
-          <FaChevronLeft
-            className="sidebar-toggle-btn"
-            onClick={onToggleCollapse}
-            title="Skrýt boční panel"
-          />
-        </div>
+        <button
+          className="sidebar-toggle-btn"
+          onClick={onToggleCollapse}
+          title="Skrýt boční panel"
+          aria-label="Skrýt boční panel"
+        >
+          <FaChevronLeft />
+        </button>
       </div>
 
       <div className="sidebar-search-container">
@@ -124,7 +117,9 @@ function Sidebar({
             return (
               <li
                 key={`${item.group ? `group-${item.name}` : item.id}`}
-                className={`sidebar-item ${isSelected ? "selected-in-sidebar" : ""}`}
+                className={`sidebar-item ${
+                  isSelected ? "selected-in-sidebar" : ""
+                }`}
                 onClick={handleClick}
                 title={title}
               >
@@ -134,9 +129,9 @@ function Sidebar({
           })}
         </ul>
       )}
-      
-      <div 
-        className={`sidebar-resizer ${isResizing ? 'resizer-active' : ''}`}
+
+      <div
+        className={`sidebar-resizer ${isResizing ? "resizer-active" : ""}`}
         onMouseDown={onStartResize}
       ></div>
     </div>

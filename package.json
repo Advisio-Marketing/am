@@ -1,15 +1,16 @@
 {
-  "name": "easy-access",
+  "name": "am",
   "version": "1.0.0",
-  "description": "Internal tool Easy Access",
+  "description": "Internal tool AM",
   "// ----- DŮLEŽITÉ: Vstupní bod pro Electron -----": "",
   "main": "main/main.js",
   "private": true,
   "scripts": {
     "// ----- Vývojové skripty -----": "",
-    "dev:vite": "vite renderer --port 5173",
-    "dev:electron": "electron .",
-    "dev": "concurrently \"npm:dev:vite\" \"wait-on tcp:5173 && npm:dev:electron\"",
+    "dev:vite": "vite --port 5173",
+    "dev:electron": "ELECTRON_RENDERER_URL=http://localhost:5173 electron .",
+    "watch:electron": "wait-on tcp:5173 && ELECTRON_RENDERER_URL=http://localhost:5173 electron .",
+    "dev": "concurrently \"npm:dev:vite\" \"npm:watch:electron\"",
     "// ----- Build skripty (pro electron-builder) -----": "",
     "check_dist": "node -e \"const fs = require('fs'); const path = require('path'); console.log('--- Kontrola složky dist ---'); try { const files = fs.readdirSync(path.resolve(__dirname, 'dist')); console.log('dist obsahuje:', files); const rendererExists = fs.existsSync(path.resolve(__dirname, 'dist/renderer')); console.log('dist/renderer existuje:', rendererExists); if(rendererExists) { const rendererFiles = fs.readdirSync(path.resolve(__dirname, 'dist/renderer')); console.log('dist/renderer obsahuje (prvních 5):', rendererFiles.slice(0, 5)); } } catch(e) { console.error('Chyba při kontrole dist:', e.message); } console.log('--- Konec kontroly ---');\"",
     "build:vite": "vite build",
@@ -45,8 +46,8 @@
   },
   "// ----- Konfigurace pro Electron Builder (přidáme později) -----": "",
   "build": {
-    "appId": "easyaccess",
-    "productName": "Easy Access",
+    "appId": "am",
+    "productName": "AM",
     "extraMetadata": {
       "main": "main/main.js"
     },
@@ -85,14 +86,14 @@
         }
       ],
       "icon": "renderer/public/img/logos/easy-access-logo.ico",
-      "artifactName": "Easy Access ${version} ${arch}.${ext}"
+      "artifactName": "AM ${version} ${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "Easy Access Setup ${version} ${arch}.${ext}",
-      "shortcutName": "Easy Access",
-      "uninstallDisplayName": "Easy Access"
+      "artifactName": "AM Setup ${version} ${arch}.${ext}",
+      "shortcutName": "AM",
+      "uninstallDisplayName": "AM"
     },
     "mac": {
       "target": [
@@ -105,7 +106,7 @@
         }
       ],
       "icon": "renderer/public/img/logos/easy-access-logo.icns",
-      "artifactName": "Easy Access ${version} ${arch}.${ext}"
+      "artifactName": "AM ${version} ${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -123,7 +124,7 @@
         }
       ],
       "icon": "renderer/public/img/logos/easy-access-logo.icns",
-      "artifactName": "Easy Access ${version} ${arch}.${ext}"
+      "artifactName": "AM ${version} ${arch}.${ext}"
     }
   }
 }

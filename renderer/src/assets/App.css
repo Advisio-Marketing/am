@@ -97,18 +97,26 @@ body.no-select object {
 /* Hlavní layout */
 .app-container-main {
   display: flex;
+  flex-direction: column; /* TabBar on top, content below */
   height: 100vh;
   width: 100vw;
   overflow: hidden;
 }
 
+.main-row {
+  display: flex;
+  flex: 1 1 auto; /* take remaining space under TabBar */
+  min-height: 0; /* allow children to manage their own overflow */
+  overflow: hidden;
+}
 .main-content-wrapper {
-  flex-grow: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  height: 100vh;
   overflow: hidden;
   background-color: #fff;
+  min-width: 0; /* prevent horizontal overflow in flex layout */
+  min-height: 0; /* allow inner scroll areas to work */
 }
 
 /* Box s tlačítky */

@@ -4,19 +4,61 @@
   align-items: stretch;
   background-color: #e9ecef;
   border-bottom: 1px solid #dee2e6;
+  overflow: hidden;
+  flex-shrink: 0;
+  height: 40px; /* match TAB_BAR_HEIGHT */
+}
+.tab-controls {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid #dee2e6;
+  background: #f8f9fa;
+  gap: 6px;
+}
+.tab-scroll {
+  display: flex;
+  align-items: stretch;
   overflow-x: auto;
   overflow-y: hidden;
-  flex-shrink: 0;
+  flex: 1 1 auto;
   scrollbar-width: thin;
   scrollbar-color: #ced4da #e9ecef;
 }
-.tab-bar::-webkit-scrollbar {
+.tab-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #495057;
+  cursor: pointer;
+}
+.tab-ctrl-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+.tab-ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.tab-ctrl-sep {
+  width: 1px;
+  height: 60%;
+  background: #dee2e6;
+  margin: 0 2px;
+}
+.icon-rotate {
+  transform-origin: 50% 50%;
+}
+.tab-scroll::-webkit-scrollbar {
   height: 5px;
 }
-.tab-bar::-webkit-scrollbar-track {
+.tab-scroll::-webkit-scrollbar-track {
   background: #e9ecef;
 }
-.tab-bar::-webkit-scrollbar-thumb {
+.tab-scroll::-webkit-scrollbar-thumb {
   background-color: #ced4da;
   border: 1px solid #e9ecef;
 }
@@ -24,7 +66,7 @@
 .tab-item {
   display: flex;
   align-items: center;
-  padding: 0 10px 0 15px;
+  padding: 0 10px 0 12px;
   border-right: 1px solid #dee2e6;
   cursor: pointer;
   background-color: #f8f9fa;
@@ -112,62 +154,23 @@
   background-color: rgba(0, 0, 0, 0.1);
 }
 
-/* --- ZMĚNA: Klasický CSS Spinner --- */
-.tab-spinner {
-  margin-left: 5px;
-  flex-shrink: 0; /* Aby se nezmenšoval */
-  display: inline-block;
-  vertical-align: middle; /* Lepší zarovnání s textem */
+/* spinner removed */
 
-  /* Rozměry spinneru */
-  width: 0.9em; /* Velikost relativní k písmu */
-  height: 0.9em;
-
-  /* Vzhled kolečka */
-  border: 2px solid rgba(108, 117, 125, 0.3); /* Světle šedý okraj */
-  border-radius: 50%; /* Udělá kolečko */
-  border-top-color: #6c757d; /* Tmavší horní část pro efekt otáčení */
-
-  /* Animace */
-  animation: spin-classic 0.8s linear infinite;
-}
-
-/* Odstranili jsme původní @keyframes spin */
-
-/* Nová keyframes animace pro otáčení */
-@keyframes spin-classic {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-/* --- KONEC ZMĚNY SPINNERU --- */
-
-.tab-item.status-loading {
-  font-style: italic;
-  color: #6c757d;
-}
-.tab-item.status-error {
-  color: #dc3545;
-}
-.tab-error-icon {
-  margin-left: 5px;
-  font-size: 0.9em;
-  display: inline-block;
-  color: inherit;
-  line-height: 1;
-  align-self: center;
-  flex-shrink: 0;
-}
-.tab-item.status-error .tab-item-name::after {
-  content: "";
-}
+/* status badges removed by design */
 
 .tab-item[draggable="true"] {
   user-select: none;
 }
 .tab-item:active {
   opacity: 0.6;
+}
+
+/* System logo on the left of each tab */
+.tab-item-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  display: inline-block;
+  margin-right: 8px;
+  flex-shrink: 0;
 }

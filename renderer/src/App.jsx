@@ -5,6 +5,8 @@ import StyledButton from "./components/StyledButton";
 import Sidebar from "./components/SideBar";
 import TabBar from "./components/TabBar";
 import ContentPlaceholder from "./components/ContentPlaceholder";
+import HomeTab from "./components/HomeTab";
+import NewTabModal from "./components/NewTabModal";
 import "./assets/App.css";
 
 const DEFAULT_SIDEBAR_WIDTH = 250;
@@ -13,6 +15,12 @@ const MAX_SIDEBAR_WIDTH = 500;
 const TAB_BAR_HEIGHT = 40;
 
 function App() {
+  const api =
+    typeof window !== "undefined" && window.electronAPI
+      ? window.electronAPI
+      : null;
+  const log =
+    typeof window !== "undefined" && window.logger ? window.logger : console;
   const [viewMode, setViewMode] = useState("login");
   const [userInfo, setUserInfo] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -24,6 +32,8 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [showNewTabModal, setShowNewTabModal] = useState(false);
+
   const [prevSidebarWidth, setPrevSidebarWidth] = useState(
     DEFAULT_SIDEBAR_WIDTH
   );
@@ -36,7 +46,7 @@ function App() {
         setIsSidebarCollapsed(false);
         const newWidth = Math.max(e.clientX, MIN_SIDEBAR_WIDTH);
         setSidebarWidth(newWidth);
-        window.electronAPI.updateSidebarWidth(newWidth);
+        api?.updateSidebarWidth?.(newWidth);
         return;
       }
 
@@ -46,7 +56,7 @@ function App() {
           MAX_SIDEBAR_WIDTH
         );
         setSidebarWidth(newWidth);
-        window.electronAPI.updateSidebarWidth(newWidth);
+        api?.updateSidebarWidth?.(newWidth);
 
         if (e.clientX < MIN_SIDEBAR_WIDTH / 2) {
           setIsSidebarCollapsed(true);
@@ -74,11 +84,13 @@ function App() {
   }, [isResizing, isSidebarCollapsed]);
 
   useEffect(() => {
-    const removeStatusListener = window.electronAPI.onTabStatusUpdate(
-      ({ accountId, status, error, name }) => {
+    if (!api?.onTabStatusUpdate) return;
+    const removeStatusListener = api.onTabStatusUpdate(
+      ({ tabId, accountId, status, error, name, system }) => {
         setOpenTabs((currentTabs) => {
+          const id = tabId || accountId; // backwards compatibility
           const existingTabIndex = currentTabs.findIndex(
-            (tab) => tab.id === accountId
+            (tab) => tab.id === id
           );
           if (existingTabIndex > -1) {
             const newTabs = [...currentTabs];
@@ -86,60 +98,398 @@ function App() {
               ...newTabs[existingTabIndex],
               status,
               error: error || null,
+              ...(system ? { system } : {}),
+              ...(accountId ? { accountId } : {}),
             };
             return newTabs;
           } else if (status !== "error" && name) {
-            if (!currentTabs.some((tab) => tab.id === accountId)) {
+            const idToUse = id;
+            if (!currentTabs.some((tab) => tab.id === idToUse)) {
               return [
                 ...currentTabs,
-                { id: accountId, name: name, status, error: null },
+                {
+                  id: idToUse,
+                  accountId: accountId || null,
+                  name: name,
+                  status,
+                  error: null,
+                  kind: "account",
+                  system: system || "heureka",
+                },
               ];
             }
           }
           return currentTabs;
         });
         if (status === "ready" && !activeTabId) {
-          setActiveTabId(accountId);
+          setActiveTabId(tabId || accountId);
         }
       }
     );
 
-    const removeActivateListener = window.electronAPI.onActivateTab(
-      (accountId) => {
-        setActiveTabId(accountId);
-      }
-    );
+    const removeActivateListener = api.onActivateTab((accountId) => {
+      setActiveTabId(accountId);
+    });
 
-    const removeForceCloseListener = window.electronAPI.onForceCloseTab(
-      (accountId) => {
-        setOpenTabs((currentTabs) =>
-          currentTabs.filter((tab) => tab.id !== accountId)
-        );
-      }
-    );
+    const removeForceCloseListener = api.onForceCloseTab((accountId) => {
+      setOpenTabs((currentTabs) =>
+        currentTabs.filter((tab) => tab.id !== accountId)
+      );
+    });
+
+    const removeTitleListener = api.onTabTitleUpdate?.(({ tabId, title }) => {
+      if (!tabId) return;
+      setOpenTabs((currentTabs) =>
+        currentTabs.map((tab) =>
+          tab.id === tabId
+            ? { ...tab, title: title && title.length ? title : tab.name }
+            : tab
+        )
+      );
+    });
 
     return () => {
       removeStatusListener();
       removeActivateListener();
       removeForceCloseListener();
+      removeTitleListener && removeTitleListener();
     };
-  }, [activeTabId]);
+  }, [activeTabId, api]);
 
-  const handleGoogleLogin = useCallback((userInfo) => {
-    console.log("Google login successful for user:", userInfo);
-    setUserInfo(userInfo);
-    setViewMode("initial");
-  }, []);
+  const handleGoogleLogin = useCallback(
+    (userInfo) => {
+      log.info("Google login successful for user:", userInfo);
+      setUserInfo(userInfo);
+      setViewMode("initial");
+    },
+    [log]
+  );
+
+  // Otevření Mergada jako nový tab (account-like)
+  const handleOpenMergado = useCallback(async () => {
+    try {
+      const res = await api?.openMergadoTab?.();
+      if (!res?.success)
+        throw new Error(res?.error || "Nepodařilo se otevřít Mergado.");
+      const { id, name } = res;
+      setOpenTabs((prev) => {
+        if (prev.some((t) => t.id === id)) return prev;
+        return [
+          ...prev,
+          {
+            id,
+            name: name || "Mergado",
+            title: "Mergado",
+            status: "loading",
+            kind: "account",
+            system: "mergado",
+          },
+        ];
+      });
+      setActiveTabId(id);
+    } catch (e) {
+      log.error("Open Mergado failed:", e);
+    }
+  }, [api, log]);
 
   const handleInitialButtonClick = useCallback(
     async (accountName) => {
-      setIsLoadingAccounts(true);
-      setErrorLoadingAccounts(null);
+      if (accountName === "Heureka") {
+        log.warn("It`s Heureka!");
+        // Show main layout and immediately open a Heureka hub tab so the sidebar is visible
+        try {
+          await api?.showMainLayout?.();
+          api?.updateSidebarWidth?.(sidebarWidth);
+          const hubId = `hub-heureka-${Date.now()}`;
+          setOpenTabs((prev) => [
+            ...prev,
+            {
+              id: hubId,
+              name: "Heureka",
+              title: "Heureka",
+              kind: "hub",
+              system: "heureka",
+              status: "ready",
+            },
+          ]);
+          setActiveTabId(hubId);
+          // Ensure native views are hidden when switching to Heureka hub
+          await api?.switchTab?.(null);
+          setViewMode("main");
+
+          // Load accounts in background (the sidebar will show loading state)
+          setIsLoadingAccounts(true);
+          setErrorLoadingAccounts(null);
+          const list = await api?.fetchAccountListHeureka?.();
+          if (Array.isArray(list)) {
+            const formattedList = list.map((item) => ({
+              id: String(item.id),
+              name: item.client_name || `Účet ${item.id}`,
+              client_country: item?.client_country,
+              client_email: item?.client_email || "",
+            }));
+            setAccounts(formattedList);
+          } else {
+            throw new Error("Neplatná data účtů.");
+          }
+        } catch (err) {
+          setErrorLoadingAccounts(`Chyba: ${err.message}`);
+        } finally {
+          setIsLoadingAccounts(false);
+        }
+      } else if (accountName === "Mergado") {
+        log.warn("It`s Mergado!");
+        try {
+          await api?.showMainLayout?.();
+          setViewMode("main");
+          api?.updateSidebarWidth?.(sidebarWidth);
+          await handleOpenMergado();
+        } catch (err) {
+          log.error("Mergado open failed:", err);
+        }
+      }
+    },
+    [sidebarWidth, handleOpenMergado, api, log]
+  );
+
+  const handleToggleCollapse = useCallback(() => {
+    if (isSidebarCollapsed) {
+      setIsSidebarCollapsed(false);
+      setSidebarWidth(prevSidebarWidth);
+      api?.updateSidebarWidth?.(prevSidebarWidth);
+    } else {
+      setPrevSidebarWidth(sidebarWidth);
+      setIsSidebarCollapsed(true);
+      api?.updateSidebarWidth?.(40);
+    }
+  }, [isSidebarCollapsed, sidebarWidth, prevSidebarWidth, api]);
+
+  const handleStartResize = useCallback((e) => {
+    e.preventDefault();
+    setIsResizing(true);
+  }, []);
+
+  const handleSwitchTab = useCallback(
+    async (tabId) => {
+      if (activeTabId === tabId) return;
+      const target = openTabs.find((t) => t.id === tabId);
+      if (!target) return;
+      // For non-account tabs (home/hub), hide native views in main process
+      if (target.kind !== "account") {
+        await api?.switchTab?.(null);
+        setActiveTabId(tabId);
+        return;
+      }
+      const result = await api?.switchTab?.(tabId);
+      if (result.success) setActiveTabId(tabId);
+    },
+    [activeTabId, openTabs, api]
+  );
+
+  const handleSidebarSelect = useCallback(
+    async (account) => {
+      const activeTab = openTabs.find((t) => t.id === activeTabId);
+      const isPlaceholder = activeTab ? activeTab.kind !== "account" : false;
+      const newTabId = `${account.id}-${Date.now()}-${Math.floor(
+        Math.random() * 1e6
+      )}`;
+
+      if (isPlaceholder) {
+        // Replace placeholder tab in-place with a new unique Heureka tab
+        setOpenTabs((prev) => {
+          const idx = prev.findIndex((t) => t.id === activeTabId);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next[idx] = {
+            id: newTabId,
+            accountId: account.id,
+            name: account.name,
+            title: account.tabTitle || undefined,
+            tooltip: account.tabTooltip || undefined,
+            status: "loading",
+            error: null,
+            kind: "account",
+            system: "heureka",
+          };
+          return next;
+        });
+        setActiveTabId(newTabId);
+      } else {
+        setActiveTabId(newTabId);
+        setOpenTabs((prev) => [
+          ...prev,
+          {
+            id: newTabId,
+            accountId: account.id,
+            name: account.name,
+            // pokud přichází ze skupiny, použijeme e-mail jako titulek záložky
+            title: account.tabTitle || undefined,
+            tooltip: account.tabTooltip || undefined,
+            status: "loading",
+            error: null,
+            kind: "account",
+            system: "heureka",
+          },
+        ]);
+      }
+      const result = await api?.selectAccount?.({
+        ...account,
+        tabId: newTabId,
+      });
+      if (!result?.success) {
+        log.error(
+          `Failed to initiate select for ${account.id}:`,
+          result?.error
+        );
+      }
+    },
+    [openTabs, activeTabId, api, log]
+  );
+
+  const handleCloseTab = useCallback(
+    async (tabId) => {
+      const target = openTabs.find((t) => t.id === tabId);
+      const remainingTabs = openTabs.filter((tab) => tab.id !== tabId);
+      setOpenTabs(remainingTabs);
+      if (activeTabId === tabId) {
+        const newActiveId = remainingTabs.length
+          ? remainingTabs[remainingTabs.length - 1].id
+          : null;
+        if (newActiveId) {
+          const next = remainingTabs.find((t) => t.id === newActiveId);
+          if (next && next.kind === "account")
+            await api?.switchTab?.(newActiveId);
+          setActiveTabId(newActiveId);
+        } else {
+          await api?.switchTab?.(null);
+          setActiveTabId(null);
+        }
+      }
+      if (target && target.kind === "account") {
+        const result = await api?.closeTab?.(tabId);
+        if (!result.success) {
+          log.error(
+            `Failed to close tab ${tabId} in main process:`,
+            result.error
+          );
+        }
+      }
+    },
+    [activeTabId, openTabs, api, log]
+  );
+
+  const handleReorderTabs = useCallback(
+    (fromId, toId) => {
+      const fromIndex = openTabs.findIndex((tab) => tab.id === fromId);
+      const toIndex = openTabs.findIndex((tab) => tab.id === toId);
+      if (fromIndex === -1 || toIndex === -1) return;
+      setOpenTabs((prev) => {
+        const arr = [...prev];
+        const [moved] = arr.splice(fromIndex, 1);
+        arr.splice(toIndex, 0, moved);
+        return arr;
+      });
+    },
+    [openTabs]
+  );
+
+  const handleLogout = useCallback(async () => {
+    log.info("Logging out user...");
+    try {
+      await api?.googleLogout?.();
+      log.info("Token successfully deleted from main process.");
+    } catch (error) {
+      log.warn("Failed to delete token via main process:", error);
+    }
+    setUserInfo(null);
+    setAccounts([]);
+    setOpenTabs([]);
+    setActiveTabId(null);
+    setViewMode("login");
+    api?.resetToHome?.().catch((error) => {
+      log.error("Error during logout reset:", error);
+    });
+  }, [api, log]);
+
+  const handleSearchChange = useCallback((event) => {
+    setSearchTerm(event.target.value);
+  }, []);
+
+  // Refresh active account tab (no-op for home/hub)
+  const handleRefresh = useCallback(
+    async (tabId) => {
+      if (!tabId) {
+        log.info("No active tab to refresh.");
+        return;
+      }
+      const target = openTabs.find((t) => t.id === tabId);
+      if (!target || target.kind !== "account") return;
+      setOpenTabs((currentTabs) =>
+        currentTabs.map((tab) =>
+          tab.id === tabId ? { ...tab, status: "loading", error: null } : tab
+        )
+      );
+      log.info(`Requesting refresh for tab: ${tabId}`);
       try {
-        await window.electronAPI.showMainLayout();
-        if (accountName === "Heureka") {
-          console.log("Heureka");
-          const list = await window.electronAPI.fetchAccountListHeureka();
+        await api?.refreshActiveTab?.(tabId);
+      } catch (error) {
+        log.error(`Failed to call refresh for tab ${tabId}:`, error);
+        setOpenTabs((currentTabs) =>
+          currentTabs.map((tab) =>
+            tab.id === tabId
+              ? { ...tab, status: "error", error: String(error) }
+              : tab
+          )
+        );
+      }
+    },
+    [openTabs, api, log]
+  );
+
+  // Home icon: close all tabs/processes and go to initial screen
+  const handleGoHome = useCallback(async () => {
+    try {
+      setOpenTabs([]);
+      setActiveTabId(null);
+      setViewMode("initial");
+      await api?.resetToHome?.();
+    } catch (e) {
+      log.error("resetToHome failed:", e);
+    }
+  }, [api, log]);
+
+  // "+" button now opens system picker modal
+  const handleNewHomeTab = useCallback(() => {
+    api?.overlayOpen?.();
+    setShowNewTabModal(true);
+  }, []);
+
+  const handlePickNewHeureka = useCallback(async () => {
+    setShowNewTabModal(false);
+    api?.overlayClose?.();
+    try {
+      await api?.showMainLayout?.();
+      api?.updateSidebarWidth?.(sidebarWidth);
+      const newId = `hub-heureka-${Date.now()}`;
+      setOpenTabs((prev) => [
+        ...prev,
+        {
+          id: newId,
+          name: "Heureka",
+          title: "Heureka",
+          kind: "hub",
+          system: "heureka",
+          status: "ready",
+        },
+      ]);
+      setActiveTabId(newId);
+      // Hide native views when activating Heureka hub
+      await api?.switchTab?.(null);
+      if (!accounts?.length) {
+        setIsLoadingAccounts(true);
+        setErrorLoadingAccounts(null);
+        try {
+          const list = await api?.fetchAccountListHeureka?.();
           if (Array.isArray(list)) {
             const formattedList = list.map((item) => ({
               id: String(item.id),
@@ -149,200 +499,32 @@ function App() {
             }));
             setAccounts(formattedList);
             setViewMode("main");
-
-            window.electronAPI.updateSidebarWidth(sidebarWidth);
-
-            const clickedAccount = formattedList.find((acc) =>
-              acc.name.includes(accountName)
-            );
-            if (clickedAccount) {
-              handleSidebarSelect(clickedAccount);
-            }
-          } else {
-            console.log("else");
           }
-        } else {
-          throw new Error("Neplatná data účtů.");
-        }
-      } catch (err) {
-        setErrorLoadingAccounts(`Chyba: ${err.message}`);
-      } finally {
-        setIsLoadingAccounts(false);
-      }
-    },
-    [sidebarWidth]
-  );
-
-  const handleToggleCollapse = useCallback(() => {
-    if (isSidebarCollapsed) {
-      setIsSidebarCollapsed(false);
-      setSidebarWidth(prevSidebarWidth);
-      window.electronAPI.updateSidebarWidth(prevSidebarWidth);
-    } else {
-      setPrevSidebarWidth(sidebarWidth);
-      setIsSidebarCollapsed(true);
-      window.electronAPI.updateSidebarWidth(40);
-    }
-  }, [isSidebarCollapsed, sidebarWidth, prevSidebarWidth]);
-
-  const handleStartResize = useCallback((e) => {
-    e.preventDefault();
-    setIsResizing(true);
-  }, []);
-
-  const handleSidebarSelect = useCallback(
-    async (account) => {
-      const isAlreadyOpen = openTabs.some((tab) => tab.id === account.id);
-      if (isAlreadyOpen) {
-        if (activeTabId !== account.id) {
-          handleSwitchTab(account.id);
+        } catch (e) {
+          setErrorLoadingAccounts(String(e?.message || e));
+        } finally {
+          setIsLoadingAccounts(false);
         }
       } else {
-        setActiveTabId(account.id);
-        setOpenTabs((prev) => [
-          ...prev,
-          {
-            id: account.id,
-            name: account.name,
-            // pokud přichází ze skupiny, použijeme e-mail jako titulek záložky
-            title: account.tabTitle || undefined,
-            tooltip: account.tabTooltip || undefined,
-            status: "loading",
-            error: null,
-          },
-        ]);
-        const result = await window.electronAPI.selectAccount(account);
-        if (!result.success) {
-          console.error(
-            `Failed to initiate select for ${account.id}:`,
-            result.error
-          );
-        }
+        setViewMode("main");
       }
-    },
-    [openTabs, activeTabId]
-  );
+    } catch (e) {
+      log.error("Pick Heureka failed:", e);
+    }
+  }, [api, accounts, log, sidebarWidth]);
 
-  const handleSwitchTab = useCallback(
-    async (accountId) => {
-      if (activeTabId === accountId) return;
-      const result = await window.electronAPI.switchTab(accountId);
-      if (result.success) {
-        setActiveTabId(accountId);
-      }
-    },
-    [activeTabId]
-  );
-
-  const handleCloseTab = useCallback(
-    async (accountId) => {
-      const remainingTabs = openTabs.filter((tab) => tab.id !== accountId);
-      setOpenTabs(remainingTabs);
-      if (activeTabId === accountId) {
-        const newActiveId =
-          remainingTabs.length > 0
-            ? remainingTabs[remainingTabs.length - 1].id
-            : null;
-        if (newActiveId) {
-          window.electronAPI.switchTab(newActiveId);
-        } else {
-          window.electronAPI.switchTab(null);
-        }
-      }
-      const result = await window.electronAPI.closeTab(accountId);
-      if (!result.success) {
-        console.error(
-          `Failed to close tab ${accountId} in main process:`,
-          result.error
-        );
-      }
-    },
-    [activeTabId, openTabs]
-  );
-
-  const handleReorderTabs = useCallback(
-    (fromId, toId) => {
-      const fromIndex = openTabs.findIndex((tab) => tab.id === fromId);
-      const toIndex = openTabs.findIndex((tab) => tab.id === toId);
-      if (fromIndex === -1 || toIndex === -1) return;
-
-      const updated = [...openTabs];
-      const [moved] = updated.splice(fromIndex, 1);
-      updated.splice(toIndex, 0, moved);
-      setOpenTabs(updated);
-    },
-    [openTabs]
-  );
-
-  const handleGoHome = useCallback(async () => {
-    console.log("Navigating back to initial screen...");
-    setOpenTabs([]);
-    setActiveTabId(null);
-    setViewMode("initial");
+  const handlePickNewMergado = useCallback(async () => {
+    setShowNewTabModal(false);
+    api?.overlayClose?.();
     try {
-      await window.electronAPI.resetToHome();
-      console.log("Main process reset successful.");
-    } catch (error) {
-      console.error("Error calling resetToHome in main process:", error);
+      await api?.showMainLayout?.();
+      setViewMode("main");
+      api?.updateSidebarWidth?.(sidebarWidth);
+      await handleOpenMergado();
+    } catch (e) {
+      log.error("Pick Mergado failed:", e);
     }
-  }, []);
-
-  const handleLogout = useCallback(async () => {
-    console.log("Logging out user...");
-    try {
-      await window.electronAPI.googleLogout();
-      console.log("Token successfully deleted from main process.");
-    } catch (error) {
-      console.error("Failed to delete token via main process:", error);
-    }
-    setUserInfo(null);
-    setAccounts([]);
-    setOpenTabs([]);
-    setActiveTabId(null);
-    setViewMode("login");
-    window.electronAPI.resetToHome().catch((error) => {
-      console.error("Error during logout reset:", error);
-    });
-  }, []);
-
-  const handleSearchChange = useCallback((event) => {
-    setSearchTerm(event.target.value);
-  }, []);
-
-  // Nová funkce pro zavolání refresh logiky
-  // Uvnitř vaší komponenty App v App.jsx
-
-  const handleRefresh = useCallback(async (accountId) => {
-    if (!accountId) {
-      console.log("No active tab to refresh.");
-      return;
-    }
-
-    // Okamžitě nastavíme stav záložky na 'loading' pro rychlou vizuální odezvu
-    setOpenTabs((currentTabs) =>
-      currentTabs.map((tab) =>
-        tab.id === accountId ? { ...tab, status: "loading", error: null } : tab
-      )
-    );
-
-    console.log(`Requesting refresh for tab: ${accountId}`);
-    try {
-      // Zavoláme hlavní proces, aby obnovil WebView
-      await window.electronAPI.refreshActiveTab(accountId);
-      // O zbytek (nastavení stavu na 'ready' nebo 'error') se postarají
-      // listenery v main.js, které pošlou zprávu zpět.
-    } catch (error) {
-      console.error(`Failed to call refresh for tab ${accountId}:`, error);
-      // Pokud selže samotné volání, nastavíme chybu
-      setOpenTabs((currentTabs) =>
-        currentTabs.map((tab) =>
-          tab.id === accountId
-            ? { ...tab, status: "error", error: error.message }
-            : tab
-        )
-      );
-    }
-  }, []); // Závislost je prázdná, protože setOpenTabs je stabilní
+  }, [api, log, sidebarWidth, handleOpenMergado]);
 
   // Skupinové zobrazení účtů podle e-mailu: víc účtů pod jedním e-mailem -> jeden řádek s e-mailem
   const displayAccounts = React.useMemo(() => {
@@ -466,7 +648,7 @@ function App() {
             />
             <AccountButton
               accountName="Glami"
-              onClick={handleDisabled}x
+              onClick={handleDisabled}
               disabled={true}
             />
             <AccountButton
@@ -486,38 +668,143 @@ function App() {
   }
 
   const activeTabInfo = openTabs.find((tab) => tab.id === activeTabId);
+  const showSidebar = activeTabInfo?.system === "heureka";
 
   return (
     <div className={`app-container-main ${isResizing ? "resizing" : ""}`}>
-      <Sidebar
-        accounts={displayAccounts}
-        onSelect={handleSidebarSelect}
-        width={sidebarWidth}
-        isLoading={isLoadingAccounts}
-        error={errorLoadingAccounts}
-        searchTerm={searchTerm}
-        onSearchChange={handleSearchChange}
-        selectedAccountId={activeTabId}
+      <TabBar
+        tabs={openTabs}
+        activeTabId={activeTabId}
+        onSwitchTab={handleSwitchTab}
+        onCloseTab={handleCloseTab}
+        height={TAB_BAR_HEIGHT}
+        onReorderTabs={handleReorderTabs}
         onGoHome={handleGoHome}
-        isCollapsed={isSidebarCollapsed}
         onToggleCollapse={handleToggleCollapse}
-        onStartResize={handleStartResize}
-        isResizing={isResizing}
+        isSidebarCollapsed={isSidebarCollapsed}
         onRefresh={handleRefresh}
+        onNewHomeTab={handleNewHomeTab}
       />
-      <div className={`main-content-wrapper ${isResizing ? "resizing" : ""}`}>
-        <TabBar
-          tabs={openTabs}
-          activeTabId={activeTabId}
-          onSwitchTab={handleSwitchTab}
-          onCloseTab={handleCloseTab}
-          height={TAB_BAR_HEIGHT}
-          onReorderTabs={handleReorderTabs}
-        />
-        <ContentPlaceholder activeTab={activeTabInfo} />
+      <div className="main-row">
+        {showSidebar && (
+          <Sidebar
+            accounts={displayAccounts}
+            onSelect={handleSidebarSelect}
+            width={sidebarWidth}
+            isLoading={isLoadingAccounts}
+            error={errorLoadingAccounts}
+            searchTerm={searchTerm}
+            onSearchChange={handleSearchChange}
+            selectedAccountId={activeTabInfo?.accountId || null}
+            onGoHome={handleGoHome}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={handleToggleCollapse}
+            onStartResize={handleStartResize}
+            isResizing={isResizing}
+            onRefresh={handleRefresh}
+          />
+        )}
+        <div className={`main-content-wrapper ${isResizing ? "resizing" : ""}`}>
+          {activeTabInfo?.kind === "home" ? (
+            <HomeTab
+              userInfo={userInfo}
+              onHeureka={async () => {
+                // Replace current home tab with Heureka hub (keeps same position and id)
+                const beforeId = activeTabInfo.id;
+                await api?.showMainLayout?.();
+                api?.updateSidebarWidth?.(sidebarWidth);
+                setOpenTabs((prev) => {
+                  const idx = prev.findIndex((t) => t.id === beforeId);
+                  if (idx === -1) return prev;
+                  const next = [...prev];
+                  next[idx] = {
+                    id: beforeId,
+                    name: "Heureka",
+                    title: "Heureka",
+                    kind: "hub",
+                    system: "heureka",
+                    status: "ready",
+                  };
+                  return next;
+                });
+                setActiveTabId(beforeId);
+                // Hide native views when switching to Heureka hub
+                await api?.switchTab?.(null);
+                // If accounts are not loaded yet, fetch them so the sidebar shows immediately
+                if (!accounts?.length) {
+                  setIsLoadingAccounts(true);
+                  setErrorLoadingAccounts(null);
+                  try {
+                    const list = await api?.fetchAccountListHeureka?.();
+                    if (Array.isArray(list)) {
+                      const formattedList = list.map((item) => ({
+                        id: String(item.id),
+                        name: item.client_name || `Účet ${item.id}`,
+                        client_country: item?.client_country,
+                        client_email: item?.client_email || "",
+                      }));
+                      setAccounts(formattedList);
+                    }
+                  } catch (e) {
+                    setErrorLoadingAccounts(String(e?.message || e));
+                  } finally {
+                    setIsLoadingAccounts(false);
+                  }
+                }
+              }}
+              onMergado={async () => {
+                // Replace current home tab at same position with Mergado tab
+                const beforeId = activeTabInfo.id;
+                try {
+                  const res = await api?.openMergadoTab?.();
+                  if (!res?.success)
+                    throw new Error(
+                      res?.error || "Nepodařilo se otevřít Mergado."
+                    );
+                  const { id, name } = res;
+                  setOpenTabs((prev) => {
+                    const idx = prev.findIndex((t) => t.id === beforeId);
+                    if (idx === -1) return prev;
+                    const withoutDup = prev.filter(
+                      (t) => t.id !== id && t.id !== beforeId
+                    );
+                    const next = [...withoutDup];
+                    next.splice(idx, 0, {
+                      id,
+                      name: name || "Mergado",
+                      title: "Mergado",
+                      status: "loading",
+                      kind: "account",
+                      system: "mergado",
+                    });
+                    return next;
+                  });
+                  setActiveTabId(id);
+                } catch (e) {
+                  log.error("Open Mergado in-place failed:", e);
+                }
+              }}
+              isLoading={isLoadingAccounts}
+            />
+          ) : (
+            <ContentPlaceholder activeTab={activeTabInfo} />
+          )}
+        </div>
       </div>
+      {showNewTabModal && (
+        <NewTabModal
+          onClose={() => {
+            setShowNewTabModal(false);
+            api?.overlayClose?.();
+          }}
+          onPickHeureka={handlePickNewHeureka}
+          onPickMergado={handlePickNewMergado}
+        />
+      )}
     </div>
   );
 }
 
 export default App;
+
+// Note: global logger is provided by preload via window.logger

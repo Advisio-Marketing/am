@@ -1,7 +1,8 @@
 // main/preload.js
 const { contextBridge, ipcRenderer } = require("electron");
+const log = require("electron-log/renderer");
 
-console.log("Preload script loaded.");
+log.transports.ipc.level = "silly";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   // Google Authentication
@@ -10,6 +11,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Po kliknutí na úvodní tlačítko
   fetchAccountListHeureka: () =>
     ipcRenderer.invoke("fetch-account-list-heureka"),
+  fetchMergado: () => ipcRenderer.invoke("fetch-mergado"),
   showMainLayout: () => ipcRenderer.invoke("show-main-layout"),
 
   // Po kliknutí v sidebaru
@@ -44,9 +46,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("force-close-tab", listener);
     return () => ipcRenderer.removeListener("force-close-tab", listener);
   },
+  onTabTitleUpdate: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("tab-title-update", listener);
+    return () => ipcRenderer.removeListener("tab-title-update", listener);
+  },
 
   googleLogout: () => ipcRenderer.invoke("google-logout"),
 
   refreshActiveTab: (accountId) =>
     ipcRenderer.invoke("refresh-active-tab", accountId),
+
+  // Open Mergado as a tabbed view inside main layout
+  openMergadoTab: () => ipcRenderer.invoke("open-mergado-tab"),
+  // Overlay show/hide (to keep React modals above native WebContentsViews)
+  overlayOpen: () => ipcRenderer.invoke("overlay-open"),
+  overlayClose: () => ipcRenderer.invoke("overlay-close"),
 });
+
+contextBridge.exposeInMainWorld("logger", log.functions);

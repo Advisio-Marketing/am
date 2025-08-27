@@ -1,12 +1,13 @@
 /* src/renderer/src/components/Sidebar.css */
 .sidebar {
   background-color: #f8f9fa;
-  height: 100vh;
+  /* height: 100vh;  -- let the row dictate height */
   display: flex;
   flex-direction: column;
   overflow-y: hidden; /* Celkový scrollbar nechceme */
   flex-shrink: 0;
   position: relative; /* Pro absolútní pozicování resizeru */
+  min-height: 0; /* allow inner list to scroll */
 }
 
 .sidebar-collapsed {
@@ -164,6 +165,9 @@
   padding: 0;
   margin: 0;
   color: #6c757d;
+  background-color: transparent;
+  outline: none;
+  border: none;
 }
 
 .home-btn:hover,

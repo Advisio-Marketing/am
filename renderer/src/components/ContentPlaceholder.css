@@ -1,6 +1,6 @@
 /* src/renderer/src/components/ContentPlaceholder.css */
 .content-placeholder {
-  flex-grow: 1; /* Vyplní dostupný prostor pod tab barem */
+  flex: 1 1 auto; /* fill remaining vertical space */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -9,8 +9,9 @@
   font-size: 1.1em;
   color: #6c757d; /* Šedá barva */
   background-color: #f1f3f5; /* Velmi světlé pozadí, aby bylo vidět, že je to placeholder */
-  overflow-y: auto; /* Umožní rolování, pokud je zpráva dlouhá */
+  overflow: auto; /* allow scroll as needed */
   line-height: 1.6;
+  min-height: 0; /* prevent overflow issues in flex */
 }
 
 .content-placeholder.status-loading::before {
@@ -19,7 +20,6 @@
   width: 20px;
   height: 20px;
   border: 2px solid rgba(108, 117, 125, 0.3);
-  border-radius: 50%;
   border-top-color: #6c757d;
   animation: content-spinner 0.8s linear infinite;
   margin-right: 10px;
