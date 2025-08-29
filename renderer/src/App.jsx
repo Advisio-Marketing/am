@@ -33,6 +33,9 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNewTabModal, setShowNewTabModal] = useState(false);
+  const [canGoBack, setCanGoBack] = useState(false);
+  // Track tabs that were detached into their own window so we don't show them again in TabBar
+  const [detachedTabIds, setDetachedTabIds] = useState(() => new Set());
 
   const [prevSidebarWidth, setPrevSidebarWidth] = useState(
     DEFAULT_SIDEBAR_WIDTH
@@ -87,8 +90,10 @@ function App() {
     if (!api?.onTabStatusUpdate) return;
     const removeStatusListener = api.onTabStatusUpdate(
       ({ tabId, accountId, status, error, name, system }) => {
+        const id = tabId || accountId; // backwards compatibility
+        // Completely ignore status updates for tabs that are currently detached
+        if (id && detachedTabIds.has(id)) return;
         setOpenTabs((currentTabs) => {
-          const id = tabId || accountId; // backwards compatibility
           const existingTabIndex = currentTabs.findIndex(
             (tab) => tab.id === id
           );
@@ -122,12 +127,33 @@ function App() {
           return currentTabs;
         });
         if (status === "ready" && !activeTabId) {
-          setActiveTabId(tabId || accountId);
+          const candidate = id;
+          const existsInTabs = openTabs.some((t) => t.id === candidate);
+          if (candidate && existsInTabs && !detachedTabIds.has(candidate)) {
+            setActiveTabId(candidate);
+          }
+        }
+        // When the active tab navigates/loads, update back availability
+        if (id && id === activeTabId) {
+          api
+            ?.canGoBack?.(id)
+            .then((res) => setCanGoBack(!!res?.canGoBack))
+            .catch(() => setCanGoBack(false));
         }
       }
     );
 
     const removeActivateListener = api.onActivateTab((accountId) => {
+      if (!accountId) return;
+      // If this id had been detached, clear the flag to allow reattach
+      if (detachedTabIds.has(accountId)) {
+        setDetachedTabIds((prev) => {
+          const next = new Set(prev);
+          next.delete(accountId);
+          return next;
+        });
+      }
+      // Set active even if the tab isn't in openTabs yet; it will be added by the next status update
       setActiveTabId(accountId);
     });
 
@@ -135,10 +161,17 @@ function App() {
       setOpenTabs((currentTabs) =>
         currentTabs.filter((tab) => tab.id !== accountId)
       );
+      // Mark this id as detached so title/activate events are ignored until reattach
+      setDetachedTabIds((prev) => {
+        const next = new Set(prev);
+        next.add(accountId);
+        return next;
+      });
     });
 
     const removeTitleListener = api.onTabTitleUpdate?.(({ tabId, title }) => {
       if (!tabId) return;
+      if (detachedTabIds.has(tabId)) return; // ignore title changes from detached windows
       setOpenTabs((currentTabs) =>
         currentTabs.map((tab) =>
           tab.id === tabId
@@ -154,7 +187,7 @@ function App() {
       removeForceCloseListener();
       removeTitleListener && removeTitleListener();
     };
-  }, [activeTabId, api]);
+  }, [activeTabId, api, openTabs, detachedTabIds]);
 
   const handleGoogleLogin = useCallback(
     (userInfo) => {
@@ -278,10 +311,20 @@ function App() {
       if (target.kind !== "account") {
         await api?.switchTab?.(null);
         setActiveTabId(tabId);
+        setCanGoBack(false);
         return;
       }
       const result = await api?.switchTab?.(tabId);
-      if (result.success) setActiveTabId(tabId);
+      if (result.success) {
+        setActiveTabId(tabId);
+        // update canGoBack when switching tabs
+        try {
+          const res = await api?.canGoBack?.(tabId);
+          setCanGoBack(!!res?.canGoBack);
+        } catch (_) {
+          setCanGoBack(false);
+        }
+      }
     },
     [activeTabId, openTabs, api]
   );
@@ -360,9 +403,17 @@ function App() {
           if (next && next.kind === "account")
             await api?.switchTab?.(newActiveId);
           setActiveTabId(newActiveId);
+          // refresh back availability for the newly active tab
+          try {
+            const res = await api?.canGoBack?.(newActiveId);
+            setCanGoBack(!!res?.canGoBack);
+          } catch (_) {
+            setCanGoBack(false);
+          }
         } else {
           await api?.switchTab?.(null);
           setActiveTabId(null);
+          setCanGoBack(false);
         }
       }
       if (target && target.kind === "account") {
@@ -393,6 +444,42 @@ function App() {
     [openTabs]
   );
 
+  // Detach an account tab into a separate window: remove it from state and track as detached
+  const handleDetachTab = useCallback(
+    async (tabId) => {
+      const target = openTabs.find((t) => t.id === tabId);
+      if (!target || target.kind !== "account") return;
+      // Remove from open tabs immediately
+      setOpenTabs((prev) => prev.filter((t) => t.id !== tabId));
+      // Update active tab if needed
+      if (activeTabId === tabId) {
+        const remaining = openTabs.filter((t) => t.id !== tabId);
+        const newActive = remaining.length
+          ? remaining[remaining.length - 1]
+          : null;
+        if (newActive) {
+          if (newActive.kind === "account")
+            await api?.switchTab?.(newActive.id);
+          else await api?.switchTab?.(null);
+          setActiveTabId(newActive.id);
+        } else {
+          await api?.switchTab?.(null);
+          setActiveTabId(null);
+        }
+      }
+      // Mark as detached so we ignore further updates
+      setDetachedTabIds((prev) => new Set(prev).add(tabId));
+      // Ask main to detach (open new window/move native view)
+      try {
+        await api?.detachTab?.(tabId);
+      } catch (e) {
+        // If detach failed, allow user to re-open later; keep it detached in UI to avoid flicker
+        log.error("detachTab failed:", e);
+      }
+    },
+    [openTabs, activeTabId, api, log]
+  );
+
   const handleLogout = useCallback(async () => {
     log.info("Logging out user...");
     try {
@@ -406,6 +493,7 @@ function App() {
     setOpenTabs([]);
     setActiveTabId(null);
     setViewMode("login");
+    setDetachedTabIds(new Set());
     api?.resetToHome?.().catch((error) => {
       log.error("Error during logout reset:", error);
     });
@@ -432,6 +520,11 @@ function App() {
       log.info(`Requesting refresh for tab: ${tabId}`);
       try {
         await api?.refreshActiveTab?.(tabId);
+        // after refresh, history remains; keep canGoBack as-is but re-check in case first load
+        try {
+          const res = await api?.canGoBack?.(tabId);
+          setCanGoBack(!!res?.canGoBack);
+        } catch (_) {}
       } catch (error) {
         log.error(`Failed to call refresh for tab ${tabId}:`, error);
         setOpenTabs((currentTabs) =>
@@ -446,12 +539,47 @@ function App() {
     [openTabs, api, log]
   );
 
+  // Update canGoBack on navigation events for active tab: listen to status updates and poll canGoBack
+  useEffect(() => {
+    let canceled = false;
+    const update = async () => {
+      if (!activeTabId) {
+        setCanGoBack(false);
+        return;
+      }
+      try {
+        const res = await api?.canGoBack?.(activeTabId);
+        if (!canceled) setCanGoBack(!!res?.canGoBack);
+      } catch (_) {
+        if (!canceled) setCanGoBack(false);
+      }
+    };
+    update();
+    return () => {
+      canceled = true;
+    };
+  }, [activeTabId, api]);
+
+  const handleBack = useCallback(async () => {
+    if (!activeTabId) return;
+    try {
+      const res = await api?.goBack?.(activeTabId);
+      if (!res?.success) return;
+      // After going back, re-check availability
+      const st = await api?.canGoBack?.(activeTabId);
+      setCanGoBack(!!st?.canGoBack);
+    } catch (_) {
+      // ignore
+    }
+  }, [activeTabId, api]);
+
   // Home icon: close all tabs/processes and go to initial screen
   const handleGoHome = useCallback(async () => {
     try {
       setOpenTabs([]);
       setActiveTabId(null);
       setViewMode("initial");
+      setDetachedTabIds(new Set());
       await api?.resetToHome?.();
     } catch (e) {
       log.error("resetToHome failed:", e);
@@ -684,6 +812,9 @@ function App() {
         isSidebarCollapsed={isSidebarCollapsed}
         onRefresh={handleRefresh}
         onNewHomeTab={handleNewHomeTab}
+        onBack={handleBack}
+        canGoBack={canGoBack}
+        onDetachTab={handleDetachTab}
       />
       <div className="main-row">
         {showSidebar && (

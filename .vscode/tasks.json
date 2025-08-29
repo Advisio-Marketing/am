@@ -9,6 +9,42 @@
 				"$eslint-stylish"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Build renderer (vite)",
+			"type": "shell",
+			"command": "npm run build:vite",
+			"problemMatcher": [
+				"$vite - stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build renderer (vite)",
+			"type": "shell",
+			"command": "npm run build:vite",
+			"problemMatcher": [
+				"$vite - stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build renderer (vite)",
+			"type": "shell",
+			"command": "npm run build:vite",
+			"problemMatcher": [
+				"$vite - stylish"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build renderer (vite)",
+			"type": "shell",
+			"command": "npm run build:vite",
+			"problemMatcher": [
+				"$vite - stylish"
+			],
+			"group": "build"
 		}
 	]
 }

@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import PropTypes from 'prop-types';
-import TabBar from './TabBar';
-import { FaHome, FaPlus } from 'react-icons/fa';
-import { FaArrowsRotate } from 'react-icons/fa6';
-import './GlobalTopBar.css';
+import React, { useState } from "react";
+import PropTypes from "prop-types";
+import TabBar from "./TabBar";
+import { FaHome, FaPlus } from "react-icons/fa";
+import { FaArrowsRotate } from "react-icons/fa6";
+import styles from "./GlobalTopBar.module.css";
 
 const GlobalTopBar = ({
   tabs,
@@ -25,13 +25,17 @@ const GlobalTopBar = ({
   };
 
   return (
-    <div className="global-top-bar">
-      <div className="global-controls">
+    <div className={styles["global-top-bar"]}>
+      <div className={styles["global-controls"]}>
         <button onClick={onGoHome} title="Zpět na výběr aplikace">
           <FaHome />
         </button>
-        <button onClick={handleRefreshClick} disabled={!activeTabId} title="Obnovit aktivní kartu">
-          <FaArrowsRotate className={isRefreshing ? 'spinning' : ''} />
+        <button
+          onClick={handleRefreshClick}
+          disabled={!activeTabId}
+          title="Obnovit aktivní kartu"
+        >
+          <FaArrowsRotate className={isRefreshing ? styles.spinning : ""} />
         </button>
         <button onClick={onNewTab} title="Nová karta">
           <FaPlus />

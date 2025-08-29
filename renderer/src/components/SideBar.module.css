@@ -1,0 +1,286 @@
+/* src/renderer/src/components/Sidebar.css */
+.sidebar {
+  background-color: #f8f9fa;
+  /* height: 100vh;  -- let the row dictate height */
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden; /* Celkový scrollbar nechceme */
+  flex-shrink: 0;
+  position: relative; /* Pro absolutní pozicování resizeru */
+  min-height: 0; /* allow inner list to scroll */
+}
+
+.sidebar-collapsed {
+  width: 40px !important;
+  min-width: 40px !important;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15px;
+  position: relative;
+}
+
+/* .sidebar-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  color: #6c757d;
+  background-color: transparent;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: #e9ecef;
+  color: #495057;
+}
+*/
+
+.sidebar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* background-color: red; */
+  gap: 8px;
+  /* margin-right: 15px; */
+  padding-inline: 1rem;
+}
+
+.sidebar-title {
+  padding: 15px;
+  font-size: 1.1em;
+  font-weight: 600;
+  color: #495057;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.heading-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #dee2e6;
+  padding-right: 1rem;
+}
+.sidebar-search-container {
+  padding: 10px 15px;
+  border-bottom: 1px solid #dee2e6;
+  background-color: #f8f9fa;
+  flex-shrink: 0;
+}
+
+.sidebar-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  font-size: 0.9em;
+}
+
+.sidebar-search-input:focus {
+  outline: none;
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+.sidebar-search-input:disabled {
+  background-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+/* Stavové zprávy */
+.sidebar-loading,
+.sidebar-error,
+.sidebar-empty {
+  padding: 15px;
+  color: #6c757d;
+  text-align: center;
+  font-style: italic;
+}
+.sidebar-error {
+  color: #dc3545;
+  font-style: normal;
+  font-weight: bold;
+}
+
+/* Seznam účtů */
+.sidebar-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex-grow: 1; /* Vyplní zbytek místa */
+  overflow-y: auto; /* Scrollbar JEN pro seznam */
+  scrollbar-width: thin;
+  scrollbar-color: #ced4da #f8f9fa;
+}
+.sidebar-list::-webkit-scrollbar {
+  height: 5px;
+  width: 6px;
+}
+.sidebar-list::-webkit-scrollbar-track {
+  background: #f8f9fa;
+}
+.sidebar-list::-webkit-scrollbar-thumb {
+  background-color: #ced4da;
+  border: 1px solid #f8f9fa;
+}
+
+.sidebar-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  cursor: pointer;
+  border-bottom: 1px solid #e9ecef;
+  color: #212529;
+  transition: background-color 0.15s ease-in-out;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar-item:hover {
+  background-color: #e9ecef;
+}
+
+/* Zvýraznění položky odpovídající aktivní záložce */
+.selected-in-sidebar {
+  background-color: #cfe2ff; /* Světle modrá */
+  /* font-weight: 500; */ /* Může být moc výrazné */
+}
+
+.sidebar-item-name {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-btn,
+.sidebar-toggle-btn,
+.refresh-btn {
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 200ms linear;
+  padding: 0;
+  margin: 0;
+  color: #6c757d;
+  background-color: transparent;
+  outline: none;
+  border: none;
+}
+
+.home-btn:hover,
+.sidebar-toggle-btn:hover,
+.refresh-btn:hover {
+  scale: 1.1;
+  color: #495057;
+}
+
+.sidebar-collapsed .sidebar-toggle-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+}
+
+/* Resizer jako součást sidebaru */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  background: linear-gradient(to right, #f8f9fa, #e9ecef, #f8f9fa);
+  border-right: 1px solid #dee2e6;
+  z-index: 100;
+}
+
+.sidebar-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  right: -4px;
+  bottom: 0;
+  cursor: col-resize;
+}
+
+.sidebar-resizer::after {
+  content: "⋮⋮";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #6c757d;
+  font-size: 8px;
+  line-height: 4px;
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+
+.sidebar-resizer:hover {
+  background: linear-gradient(to right, #007bff, #0056b3, #007bff);
+  border-color: #007bff;
+}
+
+.sidebar-resizer:active {
+  background: linear-gradient(to right, #0056b3, #004085, #0056b3);
+  border-color: #004085;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:active::after {
+  color: #ffffff;
+}
+
+.resizer-disabled {
+  cursor: default;
+  background: linear-gradient(to right, #f8f9fa, #e9ecef, #f8f9fa);
+  border-color: #dee2e6;
+  opacity: 0.5;
+}
+
+.resizer-disabled::before {
+  cursor: default;
+}
+
+.resizer-disabled:hover {
+  background: linear-gradient(to right, #f8f9fa, #e9ecef, #f8f9fa);
+  border-color: #dee2e6;
+}
+
+.resizer-disabled:hover::after {
+  color: #6c757d;
+}
+
+/* Speciální resizer pro collapsed sidebar */
+.sidebar-collapsed .sidebar-resizer {
+  border-right: none;
+  border-left: 1px solid #dee2e6;
+  width: 4px;
+  right: -2px; /* Posunout trochu mimo collapsed sidebar */
+  position: absolute;
+  z-index: 1000;
+}
+
+/* Přidejte toto na konec vašeho CSS souboru nebo nahraďte stávající kód pro refresh */
+
+/* 1. Definice nové animace s přetočením a návratem */
+@keyframes spin-and-return {
+  0% {
+    transform: rotate(0deg);
+  }
+  80% {
+    transform: rotate(540deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* 2. Třída, která animaci aplikuje na ikonu */
+.spinning {
+  /* Použijeme novou animaci */
+  animation: spin-and-return 1s ease-out;
+}

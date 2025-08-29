@@ -14,7 +14,7 @@
   min-height: 0; /* prevent overflow issues in flex */
 }
 
-.content-placeholder.status-loading::before {
+.status-loading::before {
   content: "";
   display: inline-block;
   width: 20px;
@@ -26,13 +26,13 @@
   vertical-align: middle;
   border-radius: 100vh;
 }
-.content-placeholder.status-error {
+.status-error {
   color: #dc3545; /* Červená pro chybu */
   white-space: pre-wrap; /* Zachová zalomení řádků v chybové zprávě */
   justify-content: flex-start; /* Zarovnání nahoru pro delší chyby */
   align-items: flex-start;
 }
-.content-placeholder.status-error::before {
+.status-error::before {
   content: "⚠️";
   margin-right: 10px;
   font-size: 1.5em;

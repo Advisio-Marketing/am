@@ -7,6 +7,42 @@
   overflow: hidden;
   flex-shrink: 0;
   height: 40px; /* match TAB_BAR_HEIGHT */
+  position: relative; /* allow absolute SVG overlay */
+}
+.reattach-hover {
+  /* keep layout stable: hide the bottom border visually but keep space */
+  border-bottom-color: transparent;
+}
+
+/* Absolutely-positioned SVG border that sits on top of tabs */
+.reattachOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100; /* above tab items and buttons */
+  overflow: visible; /* don't clip stroke on outer edge */
+}
+
+/* Animated dashed stroke marching around the border */
+.reattachRect {
+  stroke: #0d6efd;
+  stroke-width: 4;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 8 6;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  shape-rendering: crispEdges;
+  animation: tabbarDash 1.2s linear infinite;
+}
+
+@keyframes tabbarDash {
+  to {
+    stroke-dashoffset: -28;
+  }
 }
 .tab-controls {
   display: flex;
@@ -53,8 +89,10 @@
   transform-origin: 50% 50%;
 }
 
+/* rotate back arrow icon */
 .icon-back {
   transform: rotate(180deg);
+  transform-origin: 50% 50%;
 }
 .tab-scroll::-webkit-scrollbar {
   height: 5px;
@@ -107,12 +145,12 @@
 /* ------------------------------------------------ */
 
 /* --- Aktivní tab --- */
-.tab-item.active {
+.active {
   background-color: #cfe2ff;
   color: #084298;
   z-index: 2;
 }
-.tab-item.active::after {
+.active::after {
   transform: scaleX(0);
 } /* Skrýt červenou linku pro aktivní */
 /* ------------------------- */

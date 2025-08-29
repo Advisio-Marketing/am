@@ -1,18 +1,20 @@
-import React from 'react';
-import PropTypes from 'prop-types';
-import './StyledButton.css';
+import React from "react";
+import PropTypes from "prop-types";
+import styles from "./StyledButton.module.css";
 
-function StyledButton({ 
-  children, 
-  onClick, 
-  disabled = false, 
-  loading = false, 
-  variant = 'primary',
-  ...props 
+function StyledButton({
+  children,
+  onClick,
+  disabled = false,
+  loading = false,
+  variant = "primary",
+  ...props
 }) {
   return (
-    <button 
-      className={`styled-button styled-button--${variant} ${loading ? 'loading' : ''}`}
+    <button
+      className={`${styles["styled-button"]} ${
+        styles[`styled-button--${variant}`]
+      } ${loading ? styles["loading"] : ""}`}
       onClick={onClick}
       disabled={disabled || loading}
       {...props}
@@ -27,7 +29,7 @@ StyledButton.propTypes = {
   onClick: PropTypes.func.isRequired,
   disabled: PropTypes.bool,
   loading: PropTypes.bool,
-  variant: PropTypes.oneOf(['primary', 'danger']),
+  variant: PropTypes.oneOf(["primary", "danger"]),
 };
 
 export default StyledButton;

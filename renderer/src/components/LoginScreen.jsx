@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import PropTypes from 'prop-types';
-import StyledButton from './StyledButton';
-import './LoginScreen.css';
+import React, { useState } from "react";
+import PropTypes from "prop-types";
+import StyledButton from "./StyledButton";
+import styles from "./LoginScreen.module.css";
 
 function LoginScreen({ onLogin }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -9,44 +9,40 @@ function LoginScreen({ onLogin }) {
 
   const handleLogin = async () => {
     if (isLoading) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
-      console.log('Initiating Google authentication...');
+      console.log("Initiating Google authentication...");
       const result = await window.electronAPI.googleAuth();
-      
+
       if (result.success) {
-        console.log('Google authentication successful:', result.userInfo);
+        console.log("Google authentication successful:", result.userInfo);
         onLogin(result.userInfo);
       } else {
-        setError(result.error || 'Přihlášení se nezdařilo');
+        setError(result.error || "Přihlášení se nezdařilo");
       }
     } catch (err) {
-      console.error('Google authentication error:', err);
-      setError('Chyba při přihlašování: ' + err.message);
+      console.error("Google authentication error:", err);
+      setError("Chyba při přihlašování: " + err.message);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="login-screen">
-      <div className="login-container">
-        <div className="login-content">
-          {error && (
-            <div className="login-error">
-              {error}
-            </div>
-          )}
-          <StyledButton 
+    <div className={styles["login-screen"]}>
+      <div className={styles["login-container"]}>
+        <div className={styles["login-content"]}>
+          {error && <div className={styles["login-error"]}>{error}</div>}
+          <StyledButton
             onClick={handleLogin}
             disabled={isLoading}
             loading={isLoading}
             variant="primary"
           >
-            {isLoading ? 'Přihlašuji...' : 'Přihlásit pomocí Google'}
+            {isLoading ? "Přihlašuji..." : "Přihlásit pomocí Google"}
           </StyledButton>
         </div>
       </div>

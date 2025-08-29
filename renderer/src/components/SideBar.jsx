@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
-import "./SideBar.css";
+import styles from "./SideBar.module.css";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 
 function Sidebar({
@@ -40,26 +40,32 @@ function Sidebar({
   if (isCollapsed) {
     return (
       <div
-        className="sidebar sidebar-collapsed"
+        className={`${styles.sidebar} ${styles["sidebar-collapsed"]}`}
         style={{ width: "40px", minWidth: "40px" }}
       >
-        <div className="sidebar-toggle-btn" onClick={onToggleCollapse}>
+        <div
+          className={styles["sidebar-toggle-btn"]}
+          onClick={onToggleCollapse}
+        >
           <FaChevronRight title="Zobrazit boční panel" />
         </div>
-        <div className="sidebar-resizer" onMouseDown={onStartResize}></div>
+        <div
+          className={styles["sidebar-resizer"]}
+          onMouseDown={onStartResize}
+        ></div>
       </div>
     );
   }
 
   return (
     <div
-      className="sidebar"
+      className={styles.sidebar}
       style={{ width: `${width}px`, minWidth: `${width}px` }}
     >
-      <div className="heading-box">
-        <h2 className="sidebar-title">Účty</h2>
+      <div className={styles["heading-box"]}>
+        <h2 className={styles["sidebar-title"]}>Účty</h2>
         <button
-          className="sidebar-toggle-btn"
+          className={styles["sidebar-toggle-btn"]}
           onClick={onToggleCollapse}
           title="Skrýt boční panel"
           aria-label="Skrýt boční panel"
@@ -68,27 +74,31 @@ function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-search-container">
+      <div className={styles["sidebar-search-container"]}>
         <input
           type="search"
           placeholder="Hledat účet..."
-          className="sidebar-search-input"
+          className={styles["sidebar-search-input"]}
           value={searchTerm}
           onChange={onSearchChange}
           disabled={isLoading || !!error}
         />
       </div>
 
-      {isLoading && <p className="sidebar-loading">Načítám seznam...</p>}
-      {error && <p className="sidebar-error">{error}</p>}
+      {isLoading && (
+        <p className={styles["sidebar-loading"]}>Načítám seznam...</p>
+      )}
+      {error && <p className={styles["sidebar-error"]}>{error}</p>}
 
       {!isLoading && !error && (
-        <ul className="sidebar-list">
+        <ul className={styles["sidebar-list"]}>
           {accounts.length === 0 && searchTerm && (
-            <li className="sidebar-empty">Žádné účty neodpovídají hledání.</li>
+            <li className={styles["sidebar-empty"]}>
+              Žádné účty neodpovídají hledání.
+            </li>
           )}
           {accounts.length === 0 && !searchTerm && (
-            <li className="sidebar-empty">Nenalezeny žádné účty.</li>
+            <li className={styles["sidebar-empty"]}>Nenalezeny žádné účty.</li>
           )}
           {accounts.map((item) => {
             const isSelected = item.group
@@ -117,13 +127,13 @@ function Sidebar({
             return (
               <li
                 key={`${item.group ? `group-${item.name}` : item.id}`}
-                className={`sidebar-item ${
-                  isSelected ? "selected-in-sidebar" : ""
+                className={`${styles["sidebar-item"]} ${
+                  isSelected ? styles["selected-in-sidebar"] : ""
                 }`}
                 onClick={handleClick}
                 title={title}
               >
-                <span className="sidebar-item-name">{label}</span>
+                <span className={styles["sidebar-item-name"]}>{label}</span>
               </li>
             );
           })}
@@ -131,7 +141,9 @@ function Sidebar({
       )}
 
       <div
-        className={`sidebar-resizer ${isResizing ? "resizer-active" : ""}`}
+        className={`${styles["sidebar-resizer"]} ${
+          isResizing && styles["resizer-active"] ? styles["resizer-active"] : ""
+        }`}
         onMouseDown={onStartResize}
       ></div>
     </div>

@@ -1,16 +1,16 @@
 // src/renderer/src/components/AccountButton.jsx
-import React from 'react';
-import PropTypes from 'prop-types';
-import './AccountButton.css';
+import React from "react";
+import PropTypes from "prop-types";
+import styles from "./AccountButton.module.css";
 
 function AccountButton({ accountName, onClick, disabled, loading }) {
   return (
     <button
-        className="account-button"
-        onClick={() => !disabled && onClick(accountName)}
-        disabled={disabled}
+      className={styles["account-button"]}
+      onClick={() => !disabled && onClick(accountName)}
+      disabled={disabled}
     >
-      {loading ? 'Načítám...' : accountName}
+      {loading ? "Načítám..." : accountName}
     </button>
   );
 }
