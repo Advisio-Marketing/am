@@ -7,6 +7,8 @@ const {
   net,
   ipcMain,
   Menu,
+  BrowserWindow,
+  powerMonitor,
 } = require("electron");
 const path = require("path");
 const fs = require("node:fs").promises;
@@ -104,6 +106,270 @@ let isMainLayoutActive = false; // Začínáme s úvodní obrazovkou
 let googleAuthManager = null; // Google OAuth manager
 let hasShownUpdateDialog = false;
 let isOverlayOpen = false; // when true, hide native web views so React modals are visible
+
+// --- Activity-driven OAuth refresh (shared for all windows) ---
+const MIN_REFRESH_INTERVAL_MS = 10 * 1000; // avoid hammering Google
+let lastOAuthRefreshAt = 0;
+let logoutInProgress = false;
+let resettingHomeInProgress = false;
+
+function notifyAuthExpired(reason) {
+  try {
+    if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+      reactUiView.webContents.send("auth-expired", { reason });
+    }
+  } catch (e) {
+    log.warn("Failed to notify renderer about auth expiration:", e);
+  }
+}
+
+function closeAllDetachedWindows() {
+  try {
+    const ids = Object.keys(detachedTabs || {});
+    for (const id of ids) {
+      const rec = detachedTabs[id];
+      try {
+        if (rec?.win && !rec.win.isDestroyed()) {
+          rec.win.close();
+        }
+      } catch (e) {
+        log.warn(`Failed to close detached window ${id}:`, e);
+      }
+    }
+  } catch (e) {
+    log.warn("closeAllDetachedWindows failed:", e);
+  }
+}
+
+async function resetToHomeInternal() {
+  if (resettingHomeInProgress) return { success: true };
+  resettingHomeInProgress = true;
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return { success: true };
+
+    // Remove all tabbed webviews
+    for (const id of Object.keys(webViews)) {
+      const info = webViews[id];
+      try {
+        if (info?.titleTimer) clearTimeout(info.titleTimer);
+      } catch (_) {}
+      const view = info?.view;
+      try {
+        if (view && mainWindow.contentView.children.includes(view)) {
+          mainWindow.contentView.removeChildView(view);
+        }
+      } catch (e) {
+        log.warn(`Error removing view ${id}:`, e);
+      }
+      try {
+        view?.webContents?.destroy?.();
+      } catch (e) {
+        log.warn(`destroy webContents failed for ${id}:`, e);
+      }
+      try {
+        await info.session?.clearStorageData?.();
+      } catch (e) {
+        log.warn(`clearStorageData failed for ${id}:`, e);
+      }
+      try {
+        await info.session?.clearCache?.();
+      } catch (e) {
+        log.warn(`clearCache failed for ${id}:`, e);
+      }
+    }
+    webViews = {};
+    activeWebViewId = null;
+
+    // Remove legacy full-window Mergado view if present
+    if (mergadoView) {
+      try {
+        if (mainWindow.contentView.children.includes(mergadoView)) {
+          mainWindow.contentView.removeChildView(mergadoView);
+        }
+      } catch (e) {
+        log.warn("Error removing mergadoView:", e);
+      }
+      try {
+        mergadoView.webContents?.destroy?.();
+      } catch (e) {
+        log.warn("destroy mergado webContents failed:", e);
+      }
+      mergadoView = null;
+    }
+
+    // Keep React UI visible and mark we are back on initial
+    isMainLayoutActive = false;
+    try {
+      if (
+        reactUiView &&
+        !reactUiView.webContents.isDestroyed() &&
+        !mainWindow.contentView.children.includes(reactUiView)
+      ) {
+        mainWindow.contentView.addChildView(reactUiView);
+      }
+    } catch (e) {
+      log.warn("Failed ensuring reactUiView presence on reset:", e);
+    }
+    updateMainLayout();
+    if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+      reactUiView.webContents.send("activate-tab", null);
+    }
+    return { success: true };
+  } catch (e) {
+    log.error("resetToHomeInternal failed:", e);
+    return { success: false, error: e.message };
+  } finally {
+    resettingHomeInProgress = false;
+  }
+}
+
+function ensureGoogleAuthManager() {
+  try {
+    if (!googleAuthManager && GoogleAuthManager) {
+      googleAuthManager = new GoogleAuthManager();
+    }
+  } catch (e) {
+    log.error("Failed to initialize GoogleAuthManager:", e);
+  }
+  return googleAuthManager;
+}
+
+async function triggerAuthRefresh(reason) {
+  try {
+    const now = Date.now();
+    if (now - lastOAuthRefreshAt < MIN_REFRESH_INTERVAL_MS) {
+      log.debug(`auth-refresh skipped due to cooldown (${reason})`);
+      return;
+    }
+    lastOAuthRefreshAt = now;
+
+    const mgr = ensureGoogleAuthManager();
+    if (!mgr || !mgr.credentials) {
+      console.warn("auth-refresh: credentials not available, skipping");
+      return;
+    }
+    const creds = mgr.credentials;
+    const refreshToken = mgr.tokens?.refresh_token;
+    if (!refreshToken) {
+      console.warn(
+        "auth-refresh: no refresh_token available -> logout & show login"
+      );
+      if (!logoutInProgress) {
+        logoutInProgress = true;
+        try {
+          await mgr.logout();
+          closeAllDetachedWindows();
+          await resetToHomeInternal();
+        } catch (e) {
+          log.warn("Logout failed when no refresh token:", e);
+        } finally {
+          logoutInProgress = false;
+        }
+      }
+      notifyAuthExpired("no-refresh-token");
+      return;
+    }
+
+    const params = new URLSearchParams({
+      client_id: creds.client_id,
+      client_secret: creds.client_secret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    });
+
+    console.log(`[auth-refresh] POST ${creds.token_uri} (${reason})`);
+    const res = await net.fetch(creds.token_uri, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+    if (res.ok) {
+      console.log(
+        `[auth-refresh] OK ${res.status} ${res.statusText} (${reason})`
+      );
+    } else {
+      const errBody = await res.text().catch(() => "");
+      console.error(
+        `[auth-refresh] FAIL ${res.status} ${res.statusText} (${reason})`,
+        errBody.slice(0, 200) + (errBody.length > 200 ? "…" : "")
+      );
+      // Non-200 -> logout user per requirement
+      if (!logoutInProgress) {
+        logoutInProgress = true;
+        try {
+          await mgr.logout();
+          console.log("[auth-refresh] User logged out due to failed refresh.");
+          closeAllDetachedWindows();
+          await resetToHomeInternal();
+        } catch (e) {
+          console.error("[auth-refresh] Logout failed:", e);
+        } finally {
+          logoutInProgress = false;
+        }
+      }
+      notifyAuthExpired("refresh-failed");
+    }
+  } catch (e) {
+    console.error(`[auth-refresh] failed (${reason}):`, e);
+    notifyAuthExpired("refresh-error");
+    // Best-effort close detached windows on unexpected errors too
+    closeAllDetachedWindows();
+    await resetToHomeInternal();
+    // NOTE: logout on errors handled above is adequate; keeping here minimal to avoid double logout
+  }
+}
+
+function attachWindowActivityListeners(win) {
+  if (!win || win.isDestroyed()) return;
+  if (win.__authListenersAttached) return;
+  win.__authListenersAttached = true;
+  try {
+    win.on("focus", () => {
+      log.warn("focus");
+      triggerAuthRefresh("focus");
+    });
+    win.on("blur", () => {
+      log.warn("blur");
+      triggerAuthRefresh("blur");
+    });
+  } catch (e) {
+    log.warn("attachWindowActivityListeners failed:", e);
+  }
+}
+
+app.on("browser-window-created", (_e, win) => {
+  attachWindowActivityListeners(win);
+});
+// Also attach app-level focus/blur for reliability across all windows
+app.on("browser-window-focus", () => {
+  log.warn("focus");
+  triggerAuthRefresh("focus");
+});
+app.on("browser-window-blur", () => {
+  log.warn("blur");
+  triggerAuthRefresh("blur");
+});
+// ---------------------------------------------------------------
+
+// Helper: broadcast a tab-related event to all relevant UIs (main React UI and detached window UI if present)
+function broadcastTabUi(tabId, channel, payload) {
+  try {
+    if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+      reactUiView.webContents.send(channel, payload);
+    }
+  } catch (e) {
+    log.warn(`Failed sending ${channel} to main UI:`, e);
+  }
+  try {
+    const rec = detachedTabs?.[tabId];
+    const uiWc = rec?.ui?.webContents;
+    if (uiWc && !uiWc.isDestroyed()) {
+      uiWc.send(channel, payload);
+    }
+  } catch (e) {
+    log.warn(`Failed sending ${channel} to detached UI for ${tabId}:`, e);
+  }
+}
 
 // --- Statické Consent Cookies ---
 const consentCookies = {
@@ -333,19 +599,8 @@ function maybeHandleDetachedMove(tabId) {
     const dropPoint = { x: b.x + Math.floor(b.width / 2), y: b.y + 10 };
     const hovering = rectContainsPoint(tabBarRect, dropPoint);
 
-    // Notify renderer about hover state to show visual indicator
-    try {
-      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-        const prev = !!rec._hovering;
-        if (prev !== hovering) {
-          rec._hovering = hovering;
-          reactUiView.webContents.send("tabbar-detach-hover", {
-            tabId,
-            hovering,
-          });
-        }
-      }
-    } catch (_) {}
+    // Hover-to-reattach behavior disabled: no-op (visual indicator removed)
+    rec._hovering = false;
 
     // If not hovering, cancel any pending drop attach
     if (!hovering) {
@@ -356,17 +611,7 @@ function maybeHandleDetachedMove(tabId) {
       return;
     }
 
-    // Hovering: (re)arm a short delay to simulate drop on mouse release
-    if (rec._dropTimer) clearTimeout(rec._dropTimer);
-    rec._dropTimer = setTimeout(() => {
-      try {
-        // Still hovering at timeout -> perform reattach
-        if (!detachedTabs[tabId] || !detachedTabs[tabId]._hovering) return;
-        performReattach(tabId);
-      } catch (e) {
-        log.error("reattach (timeout) failed:", e);
-      }
-    }, 500);
+    // Reattach is now handled explicitly by dropping on a TabBar via IPC.
   } catch (e) {
     log.error("maybeReattachOnPosition failed:", e);
   }
@@ -420,6 +665,8 @@ async function createWindow() {
     title: "AM",
     backgroundColor: "#ffffff",
   });
+  // Ensure focus/blur are attached for the main window immediately
+  attachWindowActivityListeners(mainWindow);
   mainWindow.on("resize", updateMainLayout);
   mainWindow.on("closed", () => {
     webViews = {};
@@ -440,6 +687,29 @@ async function createWindow() {
       devTools: is.dev,
     },
   });
+
+  // focus/blur are added for all windows via app 'browser-window-created'
+
+  powerMonitor.on("suspend", () => {
+    console.log("Počítač přechází do spánku");
+    triggerAuthRefresh("suspend");
+  });
+
+  powerMonitor.on("resume", () => {
+    console.log("Počítač se probudil");
+    triggerAuthRefresh("resume");
+  });
+
+  powerMonitor.on("lock-screen", () => {
+    console.log("Obrazovka zamknuta");
+    triggerAuthRefresh("lock-screen");
+  });
+
+  powerMonitor.on("unlock-screen", () => {
+    console.log("Obrazovka odemknuta");
+    triggerAuthRefresh("unlock-screen");
+  });
+
   mainWindow.contentView.addChildView(reactUiView);
   log.info("React UI WebContentsView added.");
   function cmpSemver(a, b) {
@@ -658,7 +928,12 @@ ipcMain.handle("refresh-active-tab", async (_event, tabId) => {
     return { success: false, error: "No account ID provided." };
   }
   log.info(`IPC: Request to refresh tab: ${tabId}`);
-  const viewInfo = webViews[tabId];
+  let viewInfo = webViews[tabId];
+  // If not in main map, try detached
+  if (!viewInfo && detachedTabs[tabId]) {
+    const rec = detachedTabs[tabId];
+    viewInfo = { view: rec.view };
+  }
   if (viewInfo && viewInfo.view && !viewInfo.view.webContents.isDestroyed()) {
     try {
       viewInfo.view.webContents.reload();
@@ -678,7 +953,11 @@ ipcMain.handle("refresh-active-tab", async (_event, tabId) => {
 ipcMain.handle("can-go-back", async (_event, tabId) => {
   try {
     if (!tabId) return { success: false, canGoBack: false, error: "No tabId" };
-    const info = webViews[tabId];
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      const rec = detachedTabs[tabId];
+      info = { view: rec.view };
+    }
     const wc = info?.view?.webContents;
     const can = !!(wc && !wc.isDestroyed() && wc.canGoBack());
     return { success: true, canGoBack: can };
@@ -692,7 +971,11 @@ ipcMain.handle("can-go-back", async (_event, tabId) => {
 ipcMain.handle("go-back", async (_event, tabId) => {
   try {
     if (!tabId) return { success: false, error: "No tabId" };
-    const info = webViews[tabId];
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      const rec = detachedTabs[tabId];
+      info = { view: rec.view };
+    }
     const wc = info?.view?.webContents;
     if (!wc || wc.isDestroyed()) {
       return { success: false, error: "View not found or destroyed." };
@@ -883,36 +1166,92 @@ async function detachTab(tabId) {
     title: info.title || info.name || "Tab",
     backgroundColor: "#ffffff",
   });
+  // Ensure activity listeners are attached to detached window too
+  attachWindowActivityListeners(win);
 
-  // Add the existing WebContentsView to the new window and size it
+  // Create UI WebContentsView with TabBar (detached.html)
+  const uiView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: is.dev,
+    },
+  });
+  win.contentView.addChildView(uiView);
+
+  // Add the existing WebContentsView (native tab) above the UI and size both
   try {
     win.contentView.addChildView(view);
   } catch (e) {
     log.error("Failed adding view to detached window:", e);
   }
-  const resizeDetached = () => {
+  const sizeDetached = () => {
     try {
       const [w, h] = win.getContentSize();
-      view.setBounds({ x: 0, y: 0, width: w, height: h });
+      // UI fills full area (acts as base), native content sits below the tab bar
+      uiView.setBounds({ x: 0, y: 0, width: w, height: h });
+      view.setBounds({
+        x: 0,
+        y: TAB_BAR_HEIGHT,
+        width: w,
+        height: Math.max(h - TAB_BAR_HEIGHT, 0),
+      });
     } catch (e) {
       // ignore
     }
   };
-  win.on("resize", resizeDetached);
+  win.on("resize", sizeDetached);
   // Initial sizing
-  resizeDetached();
+  sizeDetached();
 
-  // Track movement to support reattach on hovering the main tab bar
-  let moveTimer = null;
-  const scheduleCheck = () => {
-    if (moveTimer) clearTimeout(moveTimer);
-    moveTimer = setTimeout(() => {
-      maybeHandleDetachedMove(tabId);
-    }, 60);
-  };
-  win.on("move", scheduleCheck);
-  // Also check hover immediately once it appears to give instant feedback
-  scheduleCheck();
+  // Load the detached TabBar UI
+  try {
+    const viteDevServerUrl =
+      process.env["ELECTRON_RENDERER_URL"] || "http://localhost:5173";
+    const detachedPath = path.join(__dirname, "../dist/renderer/detached.html");
+    const qs = new URLSearchParams({
+      tabId,
+      name: String(info.name || "Tab"),
+      system: String(info.system || "heureka"),
+    }).toString();
+    if (is.dev) {
+      await uiView.webContents.loadURL(
+        `${viteDevServerUrl}/detached.html?${qs}`
+      );
+    } else {
+      await uiView.webContents.loadFile(detachedPath, { search: `?${qs}` });
+    }
+  } catch (e) {
+    log.warn("Failed to load detached UI:", e);
+  }
+
+  // After UI is ready, seed it with the current tab meta
+  try {
+    const sendMeta = () => {
+      try {
+        if (!uiView?.webContents?.isDestroyed?.()) {
+          uiView.webContents.send("tab-status-update", {
+            tabId,
+            status: "ready",
+            error: null,
+            name: info.name,
+            system: info.system,
+          });
+        }
+      } catch (_) {}
+    };
+    uiView.webContents.on("did-finish-load", () => {
+      sendMeta();
+      setTimeout(sendMeta, 150);
+      setTimeout(sendMeta, 400);
+    });
+  } catch (e) {
+    log.warn("Could not seed detached UI with tab meta:", e);
+  }
+
+  // Hover-to-reattach disabled; explicit drop on TabBar is the only way.
 
   // Ensure cleanup on close: destroy view and session data
   win.on("closed", async () => {
@@ -1022,12 +1361,7 @@ async function detachTab(tabId) {
             } catch (e) {
               log.warn("Failed to send dynamic title on reattach:", e);
             }
-            try {
-              reactUiView.webContents.send("tabbar-detach-hover", {
-                tabId,
-                hovering: false,
-              });
-            } catch (_) {}
+            // No hover UI to clear anymore
           }
         } catch (e) {
           log.error("Attach back on close failed:", e);
@@ -1065,6 +1399,7 @@ async function detachTab(tabId) {
   // Store into detached map for later reattach
   detachedTabs[tabId] = {
     win,
+    ui: uiView,
     view,
     session: info.session,
     url: info.url,
@@ -1097,83 +1432,142 @@ ipcMain.handle("detach-tab", async (_event, tabId) => {
   }
 });
 
-// Reset to initial/home state, removing all native views
-ipcMain.handle("reset-to-home", async () => {
+// Attach a detached tab into the window whose TabBar received the drop (currently supports main window)
+ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
   try {
-    if (!mainWindow || mainWindow.isDestroyed()) return { success: true };
+    const { tabId } = payload || {};
+    if (!tabId) return { success: false, error: "No tabId" };
+    const rec = detachedTabs[tabId];
+    if (!rec || !rec.view || !rec.win || rec.view.webContents.isDestroyed()) {
+      return { success: false, error: "Tab not detached or destroyed" };
+    }
+    const senderWin = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWin || senderWin.isDestroyed()) {
+      return { success: false, error: "Target window invalid" };
+    }
 
-    // Remove all tabbed webviews
-    for (const id of Object.keys(webViews)) {
-      const info = webViews[id];
+    // If target is main window, insert into main tab strip
+    if (mainWindow && senderWin.id === mainWindow.id) {
+      const {
+        view,
+        session: sess,
+        name,
+        system,
+        accountId,
+        isGroupEmail,
+        url,
+      } = rec;
+
+      // Remove from old window
       try {
-        if (info?.titleTimer) clearTimeout(info.titleTimer);
+        if (rec.win && !rec.win.isDestroyed()) {
+          if (rec.win.contentView.children?.includes?.(view)) {
+            rec.win.contentView.removeChildView(view);
+          }
+        }
+      } catch (e) {
+        log.warn("Remove view from detached win (on attach) failed:", e);
+      }
+
+      // Register in main map
+      webViews[tabId] = {
+        view,
+        session: sess,
+        url: url || undefined,
+        name,
+        system,
+        accountId,
+        isGroupEmail,
+      };
+      showView(tabId);
+      updateMainLayout();
+      try {
+        const [windowWidth, windowHeight] = mainWindow.getContentSize();
+        const isMergado = system === "mergado";
+        const leftX = isMergado ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+        const topY = TAB_BAR_HEIGHT;
+        const viewWidth = isMergado ? windowWidth : windowWidth - leftX;
+        const viewHeight = isOverlayOpen ? 0 : Math.max(windowHeight - topY, 0);
+        view.setBounds({
+          x: leftX,
+          y: topY,
+          width: viewWidth,
+          height: viewHeight,
+        });
+        view.webContents.focus();
       } catch (_) {}
-      const view = info?.view;
-      try {
-        if (view && mainWindow.contentView.children.includes(view)) {
-          mainWindow.contentView.removeChildView(view);
-        }
-      } catch (e) {
-        log.warn(`Error removing view ${id}:`, e);
-      }
-      try {
-        view?.webContents?.destroy?.();
-      } catch (e) {
-        log.warn(`destroy webContents failed for ${id}:`, e);
-      }
-      try {
-        await info.session?.clearStorageData?.();
-      } catch (e) {
-        log.warn(`clearStorageData failed for ${id}:`, e);
-      }
-      try {
-        await info.session?.clearCache?.();
-      } catch (e) {
-        log.warn(`clearCache failed for ${id}:`, e);
-      }
-    }
-    webViews = {};
-    activeWebViewId = null;
 
-    // Remove legacy full-window Mergado view if present
-    if (mergadoView) {
+      // Notify UIs: add/activate the tab and broadcast status/title
       try {
-        if (mainWindow.contentView.children.includes(mergadoView)) {
-          mainWindow.contentView.removeChildView(mergadoView);
+        if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+          reactUiView.webContents.send("activate-tab", tabId);
         }
+        broadcastTabUi(tabId, "tab-status-update", {
+          tabId,
+          accountId,
+          status: "ready",
+          error: null,
+          name,
+          system,
+        });
+        // Try to send a fresh dynamic title
+        try {
+          let dynamicTitle = null;
+          if (system === "mergado") {
+            dynamicTitle = await view.webContents
+              .executeJavaScript(
+                `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`
+              )
+              .catch(() => null);
+          } else if (system === "heureka" && isGroupEmail) {
+            const sel =
+              "body > div.cvr-flex.cvr-flex-col.cvr-min-h-full > header > div.cvr-flex.cvr-space-x-12 > button.cvr-flex.cvr-items-center.cvr-space-x-4 > div > span";
+            dynamicTitle = await view.webContents
+              .executeJavaScript(
+                `(() => { const el = document.querySelector(${JSON.stringify(
+                  sel
+                )}); return el ? (el.textContent || '').trim() : ''; })()`
+              )
+              .catch(() => null);
+          }
+          if (dynamicTitle && dynamicTitle.length) {
+            broadcastTabUi(tabId, "tab-title-update", {
+              tabId,
+              title: dynamicTitle,
+            });
+          }
+        } catch (_) {}
       } catch (e) {
-        log.warn("Error removing mergadoView:", e);
+        log.warn("Failed to notify main UI after attach:", e);
       }
+
+      // Close the detached window without destroying the view (already moved)
       try {
-        mergadoView.webContents?.destroy?.();
+        rec._reattached = true;
+        if (rec.win && !rec.win.isDestroyed()) rec.win.close();
       } catch (e) {
-        log.warn("destroy mergado webContents failed:", e);
+        log.warn("Closing detached window after attach failed:", e);
       }
-      mergadoView = null;
+
+      try {
+        delete detachedTabs[tabId];
+      } catch (_) {}
+      return { success: true };
     }
 
-    // Keep React UI visible and mark we are back on initial
-    isMainLayoutActive = false;
-    try {
-      if (
-        reactUiView &&
-        !reactUiView.webContents.isDestroyed() &&
-        !mainWindow.contentView.children.includes(reactUiView)
-      ) {
-        mainWindow.contentView.addChildView(reactUiView);
-      }
-    } catch (e) {
-      log.warn("Failed ensuring reactUiView presence on reset:", e);
-    }
-    updateMainLayout();
-    if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-      reactUiView.webContents.send("activate-tab", null);
-    }
-    return { success: true };
+    return {
+      success: false,
+      error: "Attach to non-main window not implemented yet",
+    };
   } catch (e) {
-    log.error("reset-to-home failed:", e);
+    log.error("attach-detached-tab-here failed:", e);
     return { success: false, error: e.message };
   }
+});
+
+// Reset to initial/home state, removing all native views
+ipcMain.handle("reset-to-home", async () => {
+  return await resetToHomeInternal();
 });
 
 ipcMain.handle("select-account", async (_event, accountInfo) => {
@@ -1223,16 +1617,14 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
   });
   const webContents = newView.webContents;
   const sendStatus = (status, error = null) => {
-    if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-      reactUiView.webContents.send("tab-status-update", {
-        tabId,
-        accountId,
-        status,
-        error,
-        name: accountName,
-        system: "heureka",
-      });
-    }
+    broadcastTabUi(tabId, "tab-status-update", {
+      tabId,
+      accountId,
+      status,
+      error,
+      name: accountName,
+      system: "heureka",
+    });
   };
   webContents.on(
     "did-start-navigation",
@@ -1279,15 +1671,22 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
         const next = text && text.length ? text : DEFAULT_TITLE;
         if (next !== lastTitle) {
           lastTitle = next;
-          if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-            reactUiView.webContents.send("tab-title-update", {
-              tabId,
-              title: next,
-            });
-          }
+          broadcastTabUi(tabId, "tab-title-update", { tabId, title: next });
         }
       } catch (_) {
         // ignore
+        // Network or other error -> logout user per requirement
+        try {
+          if (!logoutInProgress) {
+            logoutInProgress = true;
+            await ensureGoogleAuthManager()?.logout();
+            console.log("[auth-refresh] User logged out due to refresh error.");
+          }
+        } catch (err) {
+          console.error("[auth-refresh] Logout after error failed:", err);
+        } finally {
+          logoutInProgress = false;
+        }
       } finally {
         if (
           newView &&
@@ -1595,15 +1994,13 @@ ipcMain.handle("open-mergado-tab", async () => {
     }
     const webContents = newView.webContents;
     const sendStatus = (status, error = null) => {
-      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-        reactUiView.webContents.send("tab-status-update", {
-          tabId: uniqueId,
-          status,
-          error,
-          name: "Mergado",
-          system: "mergado",
-        });
-      }
+      broadcastTabUi(uniqueId, "tab-status-update", {
+        tabId: uniqueId,
+        status,
+        error,
+        name: "Mergado",
+        system: "mergado",
+      });
     };
     webContents.on(
       "did-start-navigation",
@@ -1667,12 +2064,10 @@ ipcMain.handle("open-mergado-tab", async () => {
           const next = text && text.length ? text : "Mergado";
           if (next !== lastTitle) {
             lastTitle = next;
-            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
-              reactUiView.webContents.send("tab-title-update", {
-                tabId: uniqueId,
-                title: next,
-              });
-            }
+            broadcastTabUi(uniqueId, "tab-title-update", {
+              tabId: uniqueId,
+              title: next,
+            });
           }
         } catch (_) {
           // ignore

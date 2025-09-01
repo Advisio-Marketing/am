@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Detach tab via drag-out
   detachTab: (tabId) => ipcRenderer.invoke("detach-tab", tabId),
+  // Attach a detached tab into the window that calls this (drop target TabBar)
+  attachDetachedTabHere: (tabId) =>
+    ipcRenderer.invoke("attach-detached-tab-here", { tabId }),
 
   // Po kliknutí na 'x' na tabu
   closeTab: (accountId) => ipcRenderer.invoke("close-tab", accountId),
@@ -74,6 +77,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("tab-title-update", listener);
     return () => ipcRenderer.removeListener("tab-title-update", listener);
+  },
+
+  // Auth expired notification -> return UI to login
+  onAuthExpired: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("auth-expired", listener);
+    return () => ipcRenderer.removeListener("auth-expired", listener);
   },
 
   // Hover indicator for reattaching a detached window over TabBar

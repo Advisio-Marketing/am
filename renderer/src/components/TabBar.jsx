@@ -34,6 +34,10 @@ function TabBar({
     dragTabId.current = tabId;
     e.dataTransfer.effectAllowed = "move";
     dragOrigin.current = { x: e.clientX, y: e.clientY };
+    try {
+      // Enable cross-window DnD by carrying the tab id in the payload
+      e.dataTransfer.setData("text/x-am-tab-id", String(tabId));
+    } catch (_) {}
   };
 
   const handleDragOver = (e, overTabId) => {
@@ -43,10 +47,28 @@ function TabBar({
 
   const handleDrop = (e, dropTabId) => {
     e.preventDefault();
-    const fromId = dragTabId.current;
+    let fromId = dragTabId.current;
+    if (!fromId) {
+      // Cross-window: read from dataTransfer
+      try {
+        fromId = e.dataTransfer.getData("text/x-am-tab-id") || null;
+      } catch (_) {}
+    }
     const toId = dropTabId;
-    if (fromId && toId && fromId !== toId) {
-      onReorderTabs(fromId, toId);
+    if (!fromId) {
+      dragTabId.current = null;
+      return;
+    }
+    const fromExistsHere = !!tabs.find((t) => t.id === fromId);
+    if (fromExistsHere) {
+      if (toId && fromId !== toId) onReorderTabs(fromId, toId);
+    } else {
+      // Dropped a detached tab from another window onto this TabBar => attach here
+      const api =
+        typeof window !== "undefined" && window.electronAPI
+          ? window.electronAPI
+          : null;
+      api?.attachDetachedTabHere?.(fromId);
     }
     dragTabId.current = null;
   };
@@ -118,13 +140,15 @@ function TabBar({
         </svg>
       )}
       <div className={styles["tab-controls"]}>
-        <button
-          className={styles["tab-ctrl-btn"]}
-          onClick={onGoHome}
-          title="Domů"
-        >
-          <FaHome />
-        </button>
+        {typeof onGoHome === "function" && (
+          <button
+            className={styles["tab-ctrl-btn"]}
+            onClick={onGoHome}
+            title="Domů"
+          >
+            <FaHome />
+          </button>
+        )}
         <button
           className={styles["tab-ctrl-btn"]}
           onClick={() => onRefresh && onRefresh(activeTabId)}
@@ -149,15 +173,39 @@ function TabBar({
           <FaArrowRightToBracket className={styles["icon-back"]} />
         </button>
         <div className={styles["tab-ctrl-sep"]} />
-        <button
-          className={styles["tab-ctrl-btn"]}
-          onClick={onNewHomeTab}
-          title="Nová karta"
-        >
-          <FaPlus />
-        </button>
+        {typeof onNewHomeTab === "function" && (
+          <button
+            className={styles["tab-ctrl-btn"]}
+            onClick={onNewHomeTab}
+            title="Nová karta"
+          >
+            <FaPlus />
+          </button>
+        )}
       </div>
-      <div className={styles["tab-scroll"]}>
+      <div
+        className={styles["tab-scroll"]}
+        onDragOver={(e) => {
+          // allow drop anywhere in tab strip for cross-window attach
+          e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          let fromId = null;
+          try {
+            fromId = e.dataTransfer.getData("text/x-am-tab-id") || null;
+          } catch (_) {}
+          if (!fromId) return;
+          const fromExistsHere = !!tabs.find((t) => t.id === fromId);
+          if (!fromExistsHere) {
+            const api =
+              typeof window !== "undefined" && window.electronAPI
+                ? window.electronAPI
+                : null;
+            api?.attachDetachedTabHere?.(fromId);
+          }
+        }}
+      >
         {tabs.map((tab) => {
           const logoSrc =
             tab.system === "heureka"
@@ -233,11 +281,11 @@ TabBar.propTypes = {
   onCloseTab: PropTypes.func.isRequired,
   height: PropTypes.number.isRequired,
   onReorderTabs: PropTypes.func.isRequired,
-  onGoHome: PropTypes.func.isRequired,
+  onGoHome: PropTypes.func,
   onToggleCollapse: PropTypes.func.isRequired,
   isSidebarCollapsed: PropTypes.bool.isRequired,
   onRefresh: PropTypes.func.isRequired,
-  onNewHomeTab: PropTypes.func.isRequired,
+  onNewHomeTab: PropTypes.func,
   onBack: PropTypes.func.isRequired,
   canGoBack: PropTypes.bool.isRequired,
   onDetachTab: PropTypes.func,

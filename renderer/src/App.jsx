@@ -499,6 +499,23 @@ function App() {
     });
   }, [api, log]);
 
+  // React to auth-expired from main process (e.g., refresh failure or missing token)
+  useEffect(() => {
+    if (!api?.onAuthExpired) return;
+    const remove = api.onAuthExpired((_payload) => {
+      log.warn(
+        "Auth expired notification received. Returning to login screen."
+      );
+      // Don't call googleLogout here; main already revoked/cleared. Just reset UI state.
+      setUserInfo(null);
+      setAccounts([]);
+      setOpenTabs([]);
+      setActiveTabId(null);
+      setViewMode("login");
+    });
+    return () => remove && remove();
+  }, [api, log]);
+
   const handleSearchChange = useCallback((event) => {
     setSearchTerm(event.target.value);
   }, []);
