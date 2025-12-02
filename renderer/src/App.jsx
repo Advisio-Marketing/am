@@ -683,30 +683,53 @@ function App() {
     const items = [];
     for (const [email, list] of emailMap.entries()) {
       if (list.length > 1 && email) {
-        // víc účtů pod jedním emailem -> skupina
-        // reprezentant: první podle id vzestupně
-        const representative = [...list].sort(
-          (a, b) => Number(a.id) - Number(b.id)
-        )[0];
-        const tooltipNames = list
-          .map(
-            (a) =>
-              `${a.name || `Účet ${a.id}`}${
-                a.client_country ? ` (${a.client_country})` : ""
-              }`
-          )
-          .join(", ");
-        items.push({
-          // pro výběr/id použijeme reprezentanta, aby se otevřel jen jeden
-          id: representative.id,
-          name: email, // v sidebaru zobrazíme e-mail
-          client_country: representative.client_country,
-          client_email: email,
-          group: true,
-          representative,
-          groupAccounts: list,
-          tooltip: tooltipNames,
-        });
+        // víc účtů pod jedním emailem -> skupiny dle země (CZ/SK) pokud jsou obě
+        const byCountry = list.reduce(
+          (acc, a) => {
+            const cc = String(a.client_country || "").toLowerCase();
+            if (cc === "cz") acc.cz.push(a);
+            else if (cc === "sk") acc.sk.push(a);
+            else acc.other.push(a);
+            return acc;
+          },
+          { cz: [], sk: [], other: [] }
+        );
+
+        const pushGroup = (subset, suffixLabel) => {
+          if (!subset.length) return;
+          const representative = [...subset].sort(
+            (a, b) => Number(a.id) - Number(b.id)
+          )[0];
+          const tooltipNames = subset
+            .map(
+              (a) =>
+                `${a.name || `Účet ${a.id}`}${
+                  a.client_country ? ` (${a.client_country})` : ""
+                }`
+            )
+            .join(", ");
+          items.push({
+            id: representative.id,
+            name: suffixLabel ? `${email} ${suffixLabel}` : email,
+            client_country: representative.client_country,
+            client_email: email,
+            group: true,
+            representative,
+            groupAccounts: subset,
+            tooltip: tooltipNames,
+          });
+        };
+
+        // Pokud existují jak CZ, tak SK, zobrazíme dvě skupiny se suffixy
+        if (byCountry.cz.length && byCountry.sk.length) {
+          pushGroup(byCountry.cz, "CZ");
+          pushGroup(byCountry.sk, "SK");
+          // ostatní země (pokud by se objevily) dáme do samostatné skupiny bez suffixu
+          if (byCountry.other.length) pushGroup(byCountry.other, "");
+        } else {
+          // jinak zachováme původní chování: jedna skupina pod e‑mailem
+          pushGroup(list, "");
+        }
       } else {
         // jeden účet pro daný email nebo email prázdný -> zobrazíme standardně
         for (const a of list) {

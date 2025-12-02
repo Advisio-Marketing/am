@@ -1,0 +1,39 @@
+Návod pro spuštění aplikace AM na macOS
+
+Tento postup vás provede krok za krokem instalací a spuštěním aplikace AM.
+Aplikace není podepsaná vývojářským certifikátem Apple, proto je potřeba povolit její spuštění pomocí několika jednoduchých kroků.
+
+⸻
+
+1. Otevření instalačního souboru
+	1.	Poklikejte na soubor AM.dmg (název může obsahovat i číslo verze a architekturu, např. AM 1.0.0 arm64.dmg).
+	2.	Otevře se instalační okno s ikonou aplikace AM a složkou Applications.
+
+⸻
+
+2. Instalace aplikace
+	1.	Přetáhněte ikonu aplikace AM do složky Applications (Aplikace) v instalačním okně.
+	2.	Poté můžete instalační okno zavřít.
+
+⸻
+
+3. Povolení spuštění aplikace
+	1.	Otevřete Terminál:
+	•	Stiskněte klávesovou zkratku ⌘ + mezerník (Spotlight Search).
+	•	Zadejte Terminal a potvrďte klávesou Enter.
+	2.	Do otevřeného Terminálu vložte následující příkaz a potvrďte klávesou Enter:
+
+xattr -cr /Applications/AM.app
+
+Tento příkaz odstraní omezení systému macOS pro spuštění nepodepsané aplikace.
+
+⸻
+
+4. Spuštění aplikace
+	1.	Otevřete složku Applications.
+	2.	Poklikejte na aplikaci AM.
+	•	Při prvním spuštění se může zobrazit upozornění, že aplikace pochází od neznámého vývojáře. Pokud k tomu dojde, klikněte na Otevřít.
+
+⸻
+
+Tím je aplikace připravena k použití.

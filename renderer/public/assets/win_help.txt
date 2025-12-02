@@ -1,0 +1,22 @@
+Návod pro spuštění aplikace AM na Windows
+
+Tento postup vás provede krok za krokem spuštěním aplikace AM na systému Windows.
+Aplikace není podepsaná vývojářským certifikátem, proto se při prvním spuštění může zobrazit varování systému.
+
+⸻
+
+1. Otevření instalační složky
+	1.	Po rozbalení instalačního souboru najděte ve složce spustitelný soubor AM.exe
+(název může obsahovat i číslo verze a architekturu, např. AM 1.0.0 x64.exe).
+
+⸻
+
+2. Spuštění aplikace
+	1.	Poklikejte na soubor AM.exe.
+	2.	Při prvním spuštění se může zobrazit okno Windows SmartScreen s hláškou Windows chránil váš počítač.
+	•	Klikněte na Více informací.
+	•	Poté klikněte na Spustit přesto.
+
+⸻
+
+Aplikace AM se nyní spustí a je připravena k použití.

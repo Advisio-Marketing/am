@@ -45,6 +45,18 @@
 				"$vite - stylish"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Build electron (package only)",
+			"type": "shell",
+			"command": "npm run build:win",
+			"group": "build"
+		},
+		{
+			"label": "Rebuild Windows after NSIS hook",
+			"type": "shell",
+			"command": "npm run build:win",
+			"group": "build"
 		}
 	]
 }

@@ -1,6 +1,6 @@
 {
   "name": "am",
-  "version": "1.0.1",
+  "version": "1.0.13",
   "description": "Internal tool AM",
   "// ----- DŮLEŽITÉ: Vstupní bod pro Electron -----": "",
   "main": "main/main.js",
@@ -15,18 +15,21 @@
     "check_dist": "node -e \"const fs = require('fs'); const path = require('path'); console.log('--- Kontrola složky dist ---'); try { const files = fs.readdirSync(path.resolve(__dirname, 'dist')); console.log('dist obsahuje:', files); const rendererExists = fs.existsSync(path.resolve(__dirname, 'dist/renderer')); console.log('dist/renderer existuje:', rendererExists); if(rendererExists) { const rendererFiles = fs.readdirSync(path.resolve(__dirname, 'dist/renderer')); console.log('dist/renderer obsahuje (prvních 5):', rendererFiles.slice(0, 5)); } } catch(e) { console.error('Chyba při kontrole dist:', e.message); } console.log('--- Konec kontroly ---');\"",
     "build:vite": "vite build",
     "build:electron": "electron-builder --publish=never",
-    "build": "npm run build:vite && npm run check_dist && npm run build:electron",
-    "build:mac": "npm run build:vite && npm run check_dist && electron-builder --mac --publish=never",
-    "build:win": "npm run build:vite && npm run check_dist && electron-builder --win --x64 --publish=never",
-    "build:win-force": "npm run build:vite && npm run check_dist && ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true electron-builder --win --x64 --publish=never",
-    "build:win-portable": "npm run build:vite && npm run check_dist && electron-builder --win --x64 --publish=never",
-    "build:linux": "npm run build:vite && npm run check_dist && electron-builder --linux --publish=never",
-    "build:all": "npm run build:vite && npm run check_dist && electron-builder --mac --win --linux --publish=never",
+    "postbuild:update-version": "node ./scripts/update-version-json.js && node ./scripts/push-version-to-github.js",
+    "publish:releases:dry": "node ./scripts/publish-am-releases.js --dry-run",
+    "publish:releases": "node ./scripts/publish-am-releases.js",
+    "build": "npm run build:vite && npm run check_dist && node ./scripts/build-both.js && npm run postbuild:update-version && npm run publish:releases",
+    "build:mac": "npm run build:vite && npm run check_dist && electron-builder --mac --publish=never && npm run postbuild:update-version && npm run publish:releases",
+    "build:win": "npm run build:vite && npm run check_dist && electron-builder --win --x64 --publish=never && npm run postbuild:update-version && npm run publish:releases",
+    "build:win-force": "npm run build:vite && npm run check_dist && ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true electron-builder --win --x64 --publish=never && npm run postbuild:update-version && npm run publish:releases",
+    "build:win-portable": "npm run build:vite && npm run check_dist && electron-builder --win --x64 --publish=never && npm run postbuild:update-version && npm run publish:releases",
+    "build:linux": "npm run build:vite && npm run check_dist && electron-builder --linux --publish=never && npm run postbuild:update-version && npm run publish:releases",
+    "build:all": "npm run build:vite && npm run check_dist && electron-builder --mac --win --linux --publish=never && npm run postbuild:update-version && npm run publish:releases",
     "// ----- Spuštění produkční verze -----": "",
     "start": "electron ."
   },
   "keywords": [],
-  "author": "Your Name or Company",
+  "author": "Advisio",
   "license": "UNLICENSED",
   "dependencies": {
     "electron-log": "^5.1.5",
@@ -38,6 +41,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
+    "@octokit/rest": "^20.1.1",
     "concurrently": "^8.2.2",
     "electron": "^30.0.9",
     "electron-builder": "^24.13.3",
@@ -67,18 +71,6 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
           "target": "portable",
           "arch": [
             "x64"
@@ -86,27 +78,19 @@
         }
       ],
       "icon": "renderer/public/img/logos/easy-access-logo.ico",
-      "artifactName": "AM ${version} ${arch}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "AM Setup ${version} ${arch}.${ext}",
-      "shortcutName": "AM",
-      "uninstallDisplayName": "AM"
+      "artifactName": "am.${ext}"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "universal"
           ]
         }
       ],
       "icon": "renderer/public/img/logos/easy-access-logo.icns",
-      "artifactName": "AM ${version} ${arch}.${ext}"
+      "artifactName": "am.${ext}"
     },
     "linux": {
       "target": [

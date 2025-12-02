@@ -2,7 +2,7 @@ const { net } = require("electron");
 const log = require("electron-log");
 
 const VERSION_URL =
-  "https://advisio-marketing.github.io/easy-access-version-check/version.json";
+  "https://advisio-marketing.github.io/am-version-check/version.json";
 
 async function getUpdateVersion() {
   try {

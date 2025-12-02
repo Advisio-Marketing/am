@@ -18,9 +18,9 @@ async function showStartupDialog(mainWindow, version) {
 
   if (response === 0) {
     if (process.platform === "darwin") {
-      ZIP_URL = `https://github.com/Advisio-Marketing/easy-access-version-check/releases/download/easy_access_mac/Easy.Access.${version}.arm64.dmg.zip`;
+      ZIP_URL = `https://github.com/Advisio-Marketing/am-version-check/releases/download/am-mac-v1.0.12/am.dmg.zip`;
     } else if (process.platform === "win32") {
-      ZIP_URL = `https://github.com/Advisio-Marketing/easy-access-version-check/releases/download/easy_access_win/Easy.Access.${version}.x64.exe.zip`;
+      ZIP_URL = `https://github.com/Advisio-Marketing/am-version-check/releases/download/am-win-v1.0.12/am.exe.zip`;
     }
     await shell.openExternal(ZIP_URL);
     try {
