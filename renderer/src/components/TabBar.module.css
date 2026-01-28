@@ -89,6 +89,19 @@
   transform-origin: 50% 50%;
 }
 
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* rotate back arrow icon */
 .icon-back {
   transform: rotate(180deg);
@@ -118,7 +131,9 @@
   max-width: 220px;
   min-width: 100px;
   flex-shrink: 0;
-  transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
+  transition:
+    background-color 0.15s ease-in-out,
+    color 0.15s ease-in-out;
 }
 
 /* ---- Červená linka pro hover neaktivních tabů ---- */
@@ -175,7 +190,10 @@
   opacity: 0.6;
   align-self: center;
   flex-shrink: 0;
-  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
   z-index: 3;
   position: relative;
 }
@@ -215,4 +233,93 @@
   display: inline-block;
   margin-right: 8px;
   flex-shrink: 0;
+}
+
+/* ========== Find in Page ========== */
+.find-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  max-width: 0;
+  opacity: 0;
+  transition:
+    max-width 0.25s ease-in-out,
+    opacity 0.2s ease-in-out,
+    margin 0.25s ease-in-out;
+  margin-left: 0;
+}
+
+.find-container.find-open {
+  max-width: 280px;
+  opacity: 1;
+  margin-left: 8px;
+}
+
+.find-input {
+  width: 140px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.find-input:focus {
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+}
+
+.find-count {
+  font-size: 12px;
+  color: #6c757d;
+  min-width: 36px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.find-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #495057;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.find-nav-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.find-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.find-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #6c757d;
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.find-close-btn:hover {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
 }

@@ -1,7 +1,16 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import PropTypes from "prop-types";
 import styles from "./TabBar.module.css";
-import { FaHome, FaPlus } from "react-icons/fa";
+import {
+  FaHome,
+  FaPlus,
+  FaLink,
+  FaCheck,
+  FaSearch,
+  FaTimes,
+  FaChevronUp,
+  FaChevronDown,
+} from "react-icons/fa";
 import { FaArrowsRotate } from "react-icons/fa6";
 import { FaArrowRightToBracket } from "react-icons/fa6";
 
@@ -20,15 +29,138 @@ function TabBar({
   onBack,
   canGoBack,
   onDetachTab,
+  showFind,
+  onToggleFind,
+  findFocusTrigger,
+  copyUrlTrigger,
+  refreshTrigger,
 }) {
   const dragTabId = useRef(null);
   const dragOrigin = useRef({ x: 0, y: 0 });
   const [isHoverReattach, setIsHoverReattach] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [matchInfo, setMatchInfo] = useState({ current: 0, total: 0 });
+  const searchInputRef = useRef(null);
+  const lastCopyUrlTrigger = useRef(0);
+  const prevActiveTabRef = useRef(activeTabId);
   const BASE = import.meta.env.BASE_URL; // <<< důležité pro dev/prod
   const api =
     typeof window !== "undefined" && window.electronAPI
       ? window.electronAPI
       : null;
+
+  // Detect platform for keyboard shortcut labels
+  const isMac =
+    typeof navigator !== "undefined" &&
+    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const mod = isMac ? "⌘" : "Ctrl";
+  const alt = isMac ? "⌥" : "Alt";
+
+  // Close find when tab changes
+  useEffect(() => {
+    if (prevActiveTabRef.current !== activeTabId && showFind) {
+      onToggleFind?.(false);
+    }
+    prevActiveTabRef.current = activeTabId;
+  }, [activeTabId, showFind, onToggleFind]);
+
+  // Focus search input when find opens or focus trigger changes
+  useEffect(() => {
+    if (showFind && searchInputRef.current) {
+      searchInputRef.current.focus();
+      searchInputRef.current.select();
+    }
+    if (!showFind) {
+      setSearchText("");
+      setMatchInfo({ current: 0, total: 0 });
+      if (activeTabId) {
+        api?.stopFindInPage?.(activeTabId);
+      }
+    }
+  }, [showFind, activeTabId, api, findFocusTrigger]);
+
+  // Handle copy URL trigger from keyboard shortcut
+  useEffect(() => {
+    // Only run if copyUrlTrigger actually changed (not just activeTabId)
+    if (copyUrlTrigger === 0 || copyUrlTrigger === lastCopyUrlTrigger.current)
+      return;
+    lastCopyUrlTrigger.current = copyUrlTrigger;
+
+    const doCopy = async () => {
+      if (!activeTabId) return;
+      try {
+        const result = await api?.getCurrentTabUrl?.(activeTabId);
+        if (result?.success && result.url) {
+          await api?.copyToClipboard?.(result.url);
+          setIsCopied(true);
+          setTimeout(() => setIsCopied(false), 2000);
+        }
+      } catch (e) {
+        console.error("Failed to copy URL:", e);
+      }
+    };
+    doCopy();
+  }, [copyUrlTrigger, activeTabId, api]);
+
+  // Handle refresh trigger from keyboard shortcut
+  useEffect(() => {
+    if (refreshTrigger === 0) return; // Skip initial render
+    if (!activeTabId) return;
+    setIsRefreshing(true);
+    setTimeout(() => setIsRefreshing(false), 1000);
+  }, [refreshTrigger, activeTabId]);
+
+  // Listen for find results
+  useEffect(() => {
+    if (!api?.onFindInPageResult) return;
+    const remove = api.onFindInPageResult(({ activeMatchOrdinal, matches }) => {
+      setMatchInfo({ current: activeMatchOrdinal || 0, total: matches || 0 });
+    });
+    return () => remove?.();
+  }, [api]);
+
+  // Perform search when text changes
+  useEffect(() => {
+    if (!activeTabId || !showFind) return;
+    if (searchText.length > 0) {
+      api?.findInPage?.(activeTabId, searchText);
+    } else {
+      api?.stopFindInPage?.(activeTabId);
+      setMatchInfo({ current: 0, total: 0 });
+    }
+  }, [searchText, activeTabId, api, showFind]);
+
+  const handleSearchKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Escape") {
+        onToggleFind?.(false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          api?.findInPagePrevious?.(activeTabId, searchText);
+        } else {
+          api?.findInPageNext?.(activeTabId, searchText);
+        }
+      }
+    },
+    [onToggleFind, api, activeTabId, searchText],
+  );
+
+  const handleCopyUrl = async () => {
+    if (!activeTabId || isCopied) return;
+    try {
+      const result = await api?.getCurrentTabUrl?.(activeTabId);
+      if (result?.success && result.url) {
+        await api?.copyToClipboard?.(result.url);
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+      }
+    } catch (e) {
+      console.error("Failed to copy URL:", e);
+    }
+  };
 
   const handleDragStart = (e, tabId) => {
     dragTabId.current = tabId;
@@ -144,26 +276,34 @@ function TabBar({
           <button
             className={styles["tab-ctrl-btn"]}
             onClick={onGoHome}
-            title="Domů"
+            title={`Domů (${alt}+H)`}
           >
             <FaHome />
           </button>
         )}
         <button
           className={styles["tab-ctrl-btn"]}
-          onClick={() => onRefresh && onRefresh(activeTabId)}
-          title="Obnovit aktivní záložku"
+          onClick={() => {
+            if (onRefresh && activeTabId && !isRefreshing) {
+              onRefresh(activeTabId);
+              setIsRefreshing(true);
+              setTimeout(() => setIsRefreshing(false), 1000);
+            }
+          }}
+          title={`Obnovit aktivní záložku (${mod}+R)`}
           disabled={
             !activeTabId ||
             tabs.find((t) => t.id === activeTabId)?.kind !== "account"
           }
         >
-          <FaArrowsRotate className={styles["icon-rotate"]} />
+          <FaArrowsRotate
+            className={`${styles["icon-rotate"]} ${isRefreshing ? styles.spinning : ""}`}
+          />
         </button>
         <button
           className={styles["tab-ctrl-btn"]}
           onClick={() => onBack && onBack()}
-          title="Zpět"
+          title={`Zpět (${mod}+Backspace)`}
           disabled={
             !activeTabId ||
             tabs.find((t) => t.id === activeTabId)?.kind !== "account" ||
@@ -172,12 +312,76 @@ function TabBar({
         >
           <FaArrowRightToBracket className={styles["icon-back"]} />
         </button>
+        <button
+          className={styles["tab-ctrl-btn"]}
+          onClick={handleCopyUrl}
+          title={`Kopírovat URL (${mod}+Shift+C)`}
+          disabled={
+            !activeTabId ||
+            tabs.find((t) => t.id === activeTabId)?.kind !== "account"
+          }
+        >
+          {isCopied ? <FaCheck /> : <FaLink />}
+        </button>
+        <button
+          className={styles["tab-ctrl-btn"]}
+          onClick={() => onToggleFind?.(!showFind)}
+          title={`Hledat na stránce (${mod}+F)`}
+          disabled={
+            !activeTabId ||
+            tabs.find((t) => t.id === activeTabId)?.kind !== "account"
+          }
+        >
+          <FaSearch />
+        </button>
+        {/* Find in page - animated input */}
+        <div
+          className={`${styles["find-container"]} ${showFind ? styles["find-open"] : ""}`}
+        >
+          <input
+            ref={searchInputRef}
+            type="text"
+            className={styles["find-input"]}
+            placeholder="Hledat..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+          />
+          <span className={styles["find-count"]}>
+            {searchText.length > 0
+              ? `${matchInfo.current}/${matchInfo.total}`
+              : ""}
+          </span>
+          <button
+            className={styles["find-nav-btn"]}
+            onClick={() => api?.findInPagePrevious?.(activeTabId, searchText)}
+            disabled={matchInfo.total === 0}
+            title="Předchozí (Shift+Enter)"
+          >
+            <FaChevronUp />
+          </button>
+          <button
+            className={styles["find-nav-btn"]}
+            onClick={() => api?.findInPageNext?.(activeTabId, searchText)}
+            disabled={matchInfo.total === 0}
+            title="Další (Enter)"
+          >
+            <FaChevronDown />
+          </button>
+          <button
+            className={styles["find-close-btn"]}
+            onClick={() => onToggleFind?.(false)}
+            title="Zavřít (Esc)"
+          >
+            <FaTimes />
+          </button>
+        </div>
         <div className={styles["tab-ctrl-sep"]} />
         {typeof onNewHomeTab === "function" && (
           <button
             className={styles["tab-ctrl-btn"]}
             onClick={onNewHomeTab}
-            title="Nová karta"
+            title={`Nová karta (${mod}+T)`}
           >
             <FaPlus />
           </button>
@@ -207,12 +411,20 @@ function TabBar({
         }}
       >
         {tabs.map((tab) => {
-          const logoSrc =
-            tab.system === "heureka"
-              ? `${BASE}img/platform/platform-heureka.svg`
-              : tab.system === "mergado"
-              ? `${BASE}img/platform/platform-mergado.svg`
-              : null;
+          let logoSrc = null;
+          if (tab.system === "heureka") {
+            logoSrc = `${BASE}img/platform/platform-heureka.svg`;
+          } else if (tab.system === "mergado") {
+            logoSrc = `${BASE}img/platform/platform-mergado.svg`;
+          } else if (tab.system === "google") {
+            if (tab.service === "analytics") {
+              logoSrc = `${BASE}img/platform/platform-google-analytics.svg`;
+            } else if (tab.service === "ads") {
+              logoSrc = `${BASE}img/platform/platform-google-ads.svg`;
+            } else if (tab.service === "merchant") {
+              logoSrc = `${BASE}img/platform/platform-google-merchant.svg`;
+            }
+          }
 
           return (
             <div
@@ -274,7 +486,7 @@ TabBar.propTypes = {
       status: PropTypes.oneOf(["loading", "ready", "error"]).isRequired,
       error: PropTypes.string,
       kind: PropTypes.oneOf(["account", "home", "hub"]),
-    })
+    }),
   ).isRequired,
   activeTabId: PropTypes.string,
   onSwitchTab: PropTypes.func.isRequired,
@@ -289,6 +501,11 @@ TabBar.propTypes = {
   onBack: PropTypes.func.isRequired,
   canGoBack: PropTypes.bool.isRequired,
   onDetachTab: PropTypes.func,
+  showFind: PropTypes.bool,
+  onToggleFind: PropTypes.func,
+  findFocusTrigger: PropTypes.number,
+  copyUrlTrigger: PropTypes.number,
+  refreshTrigger: PropTypes.number,
 };
 
 export default TabBar;

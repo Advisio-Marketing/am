@@ -9,6 +9,8 @@ const {
   Menu,
   BrowserWindow,
   powerMonitor,
+  clipboard,
+  globalShortcut,
 } = require("electron");
 const path = require("path");
 const fs = require("node:fs").promises;
@@ -18,39 +20,51 @@ const API_TOKEN = `advisio_api_2025_secure`;
 const { getUpdateVersion } = require("./utils/getUpdateVersion");
 const { showStartupDialog } = require("./utils/dialog");
 
+// Disable third-party cookie blocking for Google authentication
+app.commandLine.appendSwitch(
+  "disable-features",
+  "ThirdPartyCookieDeprecationTrial,PartitionedCookies",
+);
+
 log.transports.console.level = "silly";
 
 // Preload loader HTML into memory to minimize I/O latency when showing loader
 let LOADER_HTML_CACHE = null;
-async function ensureLoaderHtml() {
-  if (LOADER_HTML_CACHE) return LOADER_HTML_CACHE;
+let STARTUP_LOADER_HTML_CACHE = null;
+
+// Simple loader for tabs (original style with small logo)
+const SIMPLE_LOADER_HTML = `<!doctype html><html><head><meta charset="utf-8"/><title>Načítání…</title><meta name="viewport" content="width=device-width, initial-scale=1"/><style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;background:#f5f7fb;color:#333;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}.card{display:flex;gap:12px;align-items:center;padding:14px 18px;background:rgba(255,255,255,0.9);box-shadow:0 8px 30px rgba(0,0,0,0.12);backdrop-filter:blur(10px)}.logo{width:20px;height:20px;flex:0 0 auto;filter:grayscale(30%);opacity:.85}.title{font-size:16px;font-weight:600}.dots{display:inline-block}.dots span{display:inline-block;width:4px;height:4px;margin-left:3px;background:#666;opacity:.25;animation:pulse 1.4s infinite ease-in-out}.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}@keyframes pulse{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:.9;transform:translateY(-2px)}}</style></head><body><div class="card"><img class="logo" src="./public/img/logos/advisio_logo.svg" alt="Advisio"/><div class="title">Načítání</div><div class="dots"><span></span><span></span><span></span></div></div></body></html>`;
+
+async function ensureStartupLoaderHtml() {
+  if (STARTUP_LOADER_HTML_CACHE) return STARTUP_LOADER_HTML_CACHE;
   try {
     const rendererRoot = app.isPackaged
       ? path.join("../dist/renderer")
       : path.join("../renderer");
     const loaderPath = path.join(__dirname, rendererRoot, "loading.html");
-    LOADER_HTML_CACHE = await fs.readFile(loaderPath, "utf-8");
-    return LOADER_HTML_CACHE;
+    STARTUP_LOADER_HTML_CACHE = await fs.readFile(loaderPath, "utf-8");
+    return STARTUP_LOADER_HTML_CACHE;
   } catch (e) {
     log.warn("Failed to read loading.html, falling back to inline loader:", e);
-    LOADER_HTML_CACHE = `<!doctype html><html><head><meta charset=\"utf-8\"/><title>Načítání…</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><style>html,body{height:100%;margin:0}body{display:flex;align-items:center;justify-content:center;background:#0b1220;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}.card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:28px 32px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.25);backdrop-filter:blur(6px)}.dots{display:inline-flex;gap:6px;margin-left:8px}.dot{width:6px;height:6px;border-radius:50%;background:#7dc7ff;opacity:.4;animation:b 1.2s infinite ease-in-out}.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}@keyframes b{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}</style></head><body><div class=\"card\"><div style=\"font-size:15px;letter-spacing:.2px;opacity:.9\">Načítání<span class=\"dots\"><span class=\"dot\"></span><span class=\"dot\"></span><span class=\"dot\"></span></span></div></div></body></html>`;
-    return LOADER_HTML_CACHE;
+    STARTUP_LOADER_HTML_CACHE = `<!doctype html><html><head><meta charset="utf-8"/><title>Načítání…</title><style>html,body{height:100%;margin:0;background:#20394a}</style></head><body></body></html>`;
+    return STARTUP_LOADER_HTML_CACHE;
   }
 }
 
-async function showLocalLoader(webContents) {
+// Startup loader (big Advisio logo) - only for app startup
+async function showStartupLoader(webContents) {
   try {
-    const html = await ensureLoaderHtml();
+    const html = await ensureStartupLoaderHtml();
     const baseDir = app.isPackaged
       ? path.join(__dirname, "../dist/renderer/")
       : path.join(__dirname, "../renderer/");
     const baseUrl = `file://${baseDir}`;
     await webContents.loadURL(
       `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
-      { baseURLForDataURL: baseUrl }
+      { baseURLForDataURL: baseUrl },
     );
   } catch (e) {
-    log.warn("showLocalLoader failed, fallback to loadFile:", e);
+    log.warn("showStartupLoader failed, fallback to loadFile:", e);
     try {
       const rendererRoot = app.isPackaged
         ? path.join("../dist/renderer")
@@ -58,8 +72,24 @@ async function showLocalLoader(webContents) {
       const loaderPath = path.join(__dirname, rendererRoot, "loading.html");
       await webContents.loadFile(loaderPath);
     } catch (err) {
-      log.error("Fallback loader loadFile also failed:", err);
+      log.error("Fallback startup loader loadFile also failed:", err);
     }
+  }
+}
+
+// Simple loader for tabs
+async function showLocalLoader(webContents) {
+  try {
+    const baseDir = app.isPackaged
+      ? path.join(__dirname, "../dist/renderer/")
+      : path.join(__dirname, "../renderer/");
+    const baseUrl = `file://${baseDir}`;
+    await webContents.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(SIMPLE_LOADER_HTML)}`,
+      { baseURLForDataURL: baseUrl },
+    );
+  } catch (e) {
+    log.warn("showLocalLoader failed:", e);
   }
 }
 
@@ -106,6 +136,178 @@ let isMainLayoutActive = false; // Začínáme s úvodní obrazovkou
 let googleAuthManager = null; // Google OAuth manager
 let hasShownUpdateDialog = false;
 let isOverlayOpen = false; // when true, hide native web views so React modals are visible
+
+// Track which webContents have found-in-page listeners to avoid duplicates
+const foundInPageListeners = new WeakSet();
+
+// Track which webContents have keyboard shortcut listeners
+const keyboardShortcutListeners = new WeakSet();
+
+// Helper to attach keyboard shortcut listener to a webContents
+// This captures shortcuts when focus is on the webview (not React UI)
+function attachKeyboardShortcutListener(wc) {
+  if (!wc || keyboardShortcutListeners.has(wc)) return;
+  keyboardShortcutListeners.add(wc);
+  log.info("[Keyboard] Attaching keyboard shortcut listener to webContents");
+
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+
+    const isMac = process.platform === "darwin";
+    const modifier = isMac ? input.meta : input.control;
+
+    // Log all key presses with modifier for debugging (including arrow keys)
+    if (modifier || input.alt || input.key.includes("Arrow")) {
+      log.info(
+        `[Shortcut] Key: ${input.key}, code: ${input.code}, modifier: ${modifier}, alt: ${input.alt}, shift: ${input.shift}`,
+      );
+    }
+
+    // Forward keyboard shortcuts to React UI
+    const reactUiAvailable =
+      reactUiView && !reactUiView.webContents.isDestroyed();
+    if (!reactUiAvailable && (modifier || input.alt)) {
+      log.warn("[Shortcut] ReactUI view not available!");
+    }
+
+    if (reactUiAvailable) {
+      // Cmd/Ctrl+F - Find in page
+      if (modifier && input.key.toLowerCase() === "f") {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'find' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", { action: "find" });
+        // Focus reactUiView so the search input can receive focus
+        reactUiView.webContents.focus();
+        return;
+      }
+
+      // Cmd/Ctrl+R - Refresh
+      if (modifier && input.key.toLowerCase() === "r") {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'refresh' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "refresh",
+        });
+        return;
+      }
+
+      // Cmd/Ctrl+Backspace - Go back
+      if (modifier && input.key === "Backspace") {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'back' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", { action: "back" });
+        return;
+      }
+
+      // Cmd/Ctrl+Shift+C - Copy URL
+      if (modifier && input.shift && input.key.toLowerCase() === "c") {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'copyUrl' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "copyUrl",
+        });
+        return;
+      }
+
+      // Cmd/Ctrl+T - New tab
+      if (modifier && input.key.toLowerCase() === "t") {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'newTab' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", { action: "newTab" });
+        // Focus reactUiView so the modal can receive keyboard events
+        reactUiView.webContents.focus();
+        return;
+      }
+
+      // Alt/Option+H - Go home (use code instead of key for Mac compatibility)
+      if (
+        input.alt &&
+        (input.key.toLowerCase() === "h" || input.code === "KeyH")
+      ) {
+        event.preventDefault();
+        log.info("[Shortcut] Sending 'home' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", { action: "home" });
+        return;
+      }
+
+      // Cmd+Shift+[ (BracketLeft) or Ctrl+Shift+Tab or Cmd/Ctrl+Left - Previous tab
+      if (
+        (modifier &&
+          input.shift &&
+          (input.key === "[" || input.code === "BracketLeft")) ||
+        (input.control && input.shift && input.key === "Tab") ||
+        (modifier && input.key === "ArrowLeft")
+      ) {
+        event.preventDefault();
+        log.info(
+          "[Shortcut] Sending 'prevTab' action to React UI via before-input-event",
+        );
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "prevTab",
+        });
+        return;
+      }
+
+      // Cmd+Shift+] (BracketRight) or Ctrl+Tab or Cmd/Ctrl+Right - Next tab
+      if (
+        (modifier &&
+          input.shift &&
+          (input.key === "]" || input.code === "BracketRight")) ||
+        (input.control && !input.shift && input.key === "Tab") ||
+        (modifier && input.key === "ArrowRight")
+      ) {
+        event.preventDefault();
+        log.info(
+          "[Shortcut] Sending 'nextTab' action to React UI via before-input-event",
+        );
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "nextTab",
+        });
+        return;
+      }
+
+      // Escape - Close find bar (when find is open)
+      if (input.key === "Escape") {
+        log.info("[Shortcut] Sending 'closeFindBar' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "closeFindBar",
+        });
+        return;
+      }
+    }
+  });
+}
+
+// Helper to attach found-in-page listener to a webContents
+function attachFoundInPageListener(wc, tabId) {
+  if (!wc || foundInPageListeners.has(wc)) return;
+  foundInPageListeners.add(wc);
+  wc.on("found-in-page", (_event, result) => {
+    try {
+      // Send to main React UI
+      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+        reactUiView.webContents.send("find-in-page-result", {
+          tabId,
+          activeMatchOrdinal: result.activeMatchOrdinal,
+          matches: result.matches,
+          finalUpdate: result.finalUpdate,
+        });
+      }
+      // Also send to detached UI if this tab is detached
+      const detached = detachedTabs[tabId];
+      if (detached?.ui && !detached.ui.webContents.isDestroyed()) {
+        detached.ui.webContents.send("find-in-page-result", {
+          tabId,
+          activeMatchOrdinal: result.activeMatchOrdinal,
+          matches: result.matches,
+          finalUpdate: result.finalUpdate,
+        });
+      }
+    } catch (e) {
+      log.warn("Error sending find-in-page result:", e);
+    }
+  });
+}
 
 // --- Activity-driven OAuth refresh (shared for all windows) ---
 const MIN_REFRESH_INTERVAL_MS = 10 * 1000; // avoid hammering Google
@@ -252,7 +454,7 @@ async function triggerAuthRefresh(reason) {
     const refreshToken = mgr.tokens?.refresh_token;
     if (!refreshToken) {
       console.warn(
-        "auth-refresh: no refresh_token available -> logout & show login"
+        "auth-refresh: no refresh_token available -> logout & show login",
       );
       if (!logoutInProgress) {
         logoutInProgress = true;
@@ -285,13 +487,13 @@ async function triggerAuthRefresh(reason) {
     });
     if (res.ok) {
       console.log(
-        `[auth-refresh] OK ${res.status} ${res.statusText} (${reason})`
+        `[auth-refresh] OK ${res.status} ${res.statusText} (${reason})`,
       );
     } else {
       const errBody = await res.text().catch(() => "");
       console.error(
         `[auth-refresh] FAIL ${res.status} ${res.statusText} (${reason})`,
-        errBody.slice(0, 200) + (errBody.length > 200 ? "…" : "")
+        errBody.slice(0, 200) + (errBody.length > 200 ? "…" : ""),
       );
       // Non-200 -> logout user per requirement
       if (!logoutInProgress) {
@@ -394,8 +596,8 @@ async function fetchAccountListHeureka() {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return reject(
           new Error(
-            `Account list fetch failed with status: ${response.statusCode}`
-          )
+            `Account list fetch failed with status: ${response.statusCode}`,
+          ),
         );
       }
       let body = "";
@@ -409,13 +611,13 @@ async function fetchAccountListHeureka() {
           const jsonData = JSON.parse(body);
           if (Array.isArray(jsonData)) {
             log.info(
-              `Successfully parsed ${jsonData.length} accounts from JSON.`
+              `Successfully parsed ${jsonData.length} accounts from JSON.`,
             );
             resolve(jsonData);
           } else {
             log.error(
               "Parsed account list response is not an array:",
-              jsonData
+              jsonData,
             );
             reject(new Error("API did not return a valid account list array."));
           }
@@ -441,13 +643,13 @@ async function fetchAccountCookies(accountId) {
     const request = net.request(requestOptions);
     request.on("response", (response) => {
       log.info(
-        `API Cookies [${accountId}] Status Code: ${response.statusCode}`
+        `API Cookies [${accountId}] Status Code: ${response.statusCode}`,
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return reject(
           new Error(
-            `Cookie fetch for ${accountId} failed with status: ${response.statusCode}`
-          )
+            `Cookie fetch for ${accountId} failed with status: ${response.statusCode}`,
+          ),
         );
       }
       let body = "";
@@ -464,7 +666,7 @@ async function fetchAccountCookies(accountId) {
             resolve(jsonData);
           } else {
             log.warn(
-              `API response for ${accountId} cookies was not a valid object.`
+              `API response for ${accountId} cookies was not a valid object.`,
             );
             resolve(null);
           }
@@ -501,7 +703,7 @@ async function fetchMergadoCookies() {
       // načti tělo jako text jen kvůli chybové zprávě (max 200 znaků)
       const errBody = await res.text().catch(() => "");
       throw new Error(
-        `HTTP ${res.status} ${res.statusText}: ${errBody.slice(0, 200)}…`
+        `HTTP ${res.status} ${res.statusText}: ${errBody.slice(0, 200)}…`,
       );
     }
 
@@ -510,6 +712,148 @@ async function fetchMergadoCookies() {
   } finally {
     clearTimeout(t);
   }
+}
+
+async function fetchGoogleCredentials(email) {
+  const maskToken = (token) => {
+    const s = String(token || "");
+    if (s.length <= 8) return "***";
+    return `${s.slice(0, 4)}…${s.slice(-4)}`;
+  };
+
+  const emailToUse = String(email || "").trim() || "ppc@advisio.cz";
+
+  const requestJson = ({ label, method, url, headers, body }) =>
+    new Promise((resolve, reject) => {
+      const safeUrl = url.includes(API_TOKEN)
+        ? url.replaceAll(API_TOKEN, maskToken(API_TOKEN))
+        : url;
+      console.log(
+        `[Google credentials] Attempt: ${label} ${method} ${safeUrl}`,
+      );
+
+      const request = net.request({ method, url, timeout: 15000 });
+
+      if (headers && typeof headers === "object") {
+        for (const [k, v] of Object.entries(headers)) {
+          try {
+            request.setHeader(k, v);
+          } catch (_) {
+            // ignore
+          }
+        }
+      }
+
+      request.on("response", (response) => {
+        let raw = "";
+        response.on("data", (chunk) => {
+          raw += chunk.toString("utf8");
+        });
+        response.on("end", () => {
+          const status = response.statusCode || 0;
+          const ok = status >= 200 && status < 300;
+          console.log(
+            `[Google credentials] ${label} -> HTTP ${status} (ok=${ok}) bodyLen=${raw.length}`,
+          );
+          if (!ok) {
+            return reject(
+              Object.assign(
+                new Error(
+                  `[${label}] HTTP ${status}: ${raw
+                    .slice(0, 800)
+                    .replace(/\s+/g, " ")
+                    .trim()}`,
+                ),
+                {
+                  _debugAttempt: {
+                    label,
+                    method,
+                    url: safeUrl,
+                    status,
+                    ok,
+                    bodySnippet: raw.slice(0, 800).replace(/\s+/g, " ").trim(),
+                  },
+                },
+              ),
+            );
+          }
+
+          try {
+            const parsed = raw ? JSON.parse(raw) : null;
+            resolve({
+              parsed,
+              raw,
+              _debugAttempt: { label, method, url: safeUrl, status, ok },
+            });
+          } catch {
+            resolve({
+              parsed: raw,
+              raw,
+              _debugAttempt: { label, method, url: safeUrl, status, ok },
+            });
+          }
+        });
+      });
+
+      request.on("error", (e) => {
+        console.log(
+          `[Google credentials] ${label} error: ${e?.message || String(e)}`,
+        );
+        reject(
+          Object.assign(new Error(e?.message || String(e)), {
+            _debugAttempt: {
+              label,
+              method,
+              url: safeUrl,
+              status: null,
+              ok: false,
+              error: e?.message || String(e),
+            },
+          }),
+        );
+      });
+
+      if (body != null) {
+        try {
+          request.write(body);
+        } catch (_) {
+          // ignore
+        }
+      }
+      request.end();
+    });
+
+  const endpointsToTry = [
+    {
+      label: "GET json body",
+      method: "GET",
+      url: "https://app.advisio.cz/api/credentials/google/",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ api_token: API_TOKEN, email: emailToUse }),
+    },
+  ];
+
+  const debugAttempts = [];
+  let lastError = null;
+  for (const ep of endpointsToTry) {
+    try {
+      const res = await requestJson(ep);
+      if (res?._debugAttempt) debugAttempts.push(res._debugAttempt);
+      return { data: res.parsed, debugAttempts };
+    } catch (e) {
+      lastError = e;
+      if (e?._debugAttempt) debugAttempts.push(e._debugAttempt);
+    }
+  }
+
+  const enriched = new Error(
+    lastError?.message || "Unknown error while fetching credentials",
+  );
+  enriched.debugAttempts = debugAttempts;
+  throw enriched;
 }
 
 // --- Konec API Funkcí ---
@@ -532,11 +876,12 @@ function updateMainLayout() {
       if (wvInfo?.view && !wvInfo.view.webContents.isDestroyed()) {
         const isActive = id === activeWebViewId && isMainLayoutActive;
         if (isActive) {
-          // Heureka záložky mají místo pro sidebar, Mergado má být full width
-          const isMergado = wvInfo.system === "mergado";
-          const leftX = isMergado ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+          // Heureka záložky mají místo pro sidebar, Mergado a Google mají být full width
+          const isFullWidth =
+            wvInfo.system === "mergado" || wvInfo.system === "google";
+          const leftX = isFullWidth ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
           const topY = TAB_BAR_HEIGHT;
-          const viewWidth = isMergado ? windowWidth : windowWidth - leftX;
+          const viewWidth = isFullWidth ? windowWidth : windowWidth - leftX;
           const viewHeight = isOverlayOpen
             ? 0
             : Math.max(windowHeight - topY, 0);
@@ -658,13 +1003,15 @@ async function createWindow() {
     minHeight: 600,
     icon: path.join(
       __dirname,
-      "./renderer/public/img/logos/easy-access-logo.ico"
+      "./renderer/public/img/logos/easy-access-logo.ico",
     ),
     show: false,
     autoHideMenuBar: true,
     title: "AM",
-    backgroundColor: "#ffffff",
+    backgroundColor: "#20394a", // Match loader background color (Advisio blue)
   });
+  // Maximize the window on startup
+  mainWindow.maximize();
   // Ensure focus/blur are attached for the main window immediately
   attachWindowActivityListeners(mainWindow);
   mainWindow.on("resize", updateMainLayout);
@@ -687,6 +1034,9 @@ async function createWindow() {
       devTools: is.dev,
     },
   });
+
+  // Set background color on the WebContentsView to prevent white flash
+  reactUiView.setBackgroundColor("#20394a");
 
   // focus/blur are added for all windows via app 'browser-window-created'
 
@@ -730,16 +1080,32 @@ async function createWindow() {
 
   reactUiView.webContents.on("did-finish-load", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
+      // Window is already shown with loader, just update layout
       updateMainLayout();
     }
   });
-  // Show local loader immediately while the React UI bundles/server are loading
+
+  // Show startup loader (big Advisio logo) and wait for it to fully render before showing window
   try {
-    await showLocalLoader(reactUiView.webContents);
+    await showStartupLoader(reactUiView.webContents);
+    // Small delay to ensure the loader is painted
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Show window with the loader (splash screen)
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
   } catch (e) {
     log.warn("Initial startup loader failed:", e);
+    // Show window anyway even if loader fails
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+    }
   }
+
+  // Minimum splash screen display time (in ms)
+  const SPLASH_MIN_DELAY = 2500;
+  await new Promise((resolve) => setTimeout(resolve, SPLASH_MIN_DELAY));
+
   const viteDevServerUrl =
     process.env["ELECTRON_RENDERER_URL"] || "http://localhost:5173";
   const prodIndexPath = path.join(__dirname, "../dist/renderer/index.html");
@@ -755,11 +1121,11 @@ async function createWindow() {
       `Failed to load React UI. Dev=${is.dev}. URL/Path: ${
         is.dev ? viteDevServerUrl : prodIndexPath
       } Error:`,
-      error
+      error,
     );
     try {
       await reactUiView.webContents.loadURL(
-        `data:text/html;charset=utf-8,<h1>Chyba načítání UI</h1><p>Nepodařilo se načíst rozhraní aplikace.</p><pre>${error.message}</pre>`
+        `data:text/html;charset=utf-8,<h1>Chyba načítání UI</h1><p>Nepodařilo se načíst rozhraní aplikace.</p><pre>${error.message}</pre>`,
       );
     } catch {}
   }
@@ -827,6 +1193,18 @@ function showView(viewId) {
 }
 
 // --- IPC Handlery ---
+
+// Copy text to clipboard (works even when focus is on webview)
+ipcMain.handle("copy-to-clipboard", async (_event, text) => {
+  try {
+    clipboard.writeText(text);
+    return { success: true };
+  } catch (error) {
+    log.error("Failed to copy to clipboard:", error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle("google-auth", async () => {
   log.info("IPC: Google authentication requested.");
   try {
@@ -864,7 +1242,7 @@ ipcMain.handle("google-auth", async () => {
             showStartupDialog(mainWindow, latest);
           } else {
             log.info(
-              `APP UP TO DATE after login (current=${current}, latest=${latest})`
+              `APP UP TO DATE after login (current=${current}, latest=${latest})`,
             );
           }
         } else {
@@ -967,6 +1345,100 @@ ipcMain.handle("can-go-back", async (_event, tabId) => {
   }
 });
 
+// Get current URL of a specific tab
+ipcMain.handle("get-current-tab-url", async (_event, tabId) => {
+  try {
+    if (!tabId) return { success: false, url: null, error: "No tabId" };
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      const rec = detachedTabs[tabId];
+      info = { view: rec.view };
+    }
+    const wc = info?.view?.webContents;
+    if (!wc || wc.isDestroyed()) {
+      return { success: false, url: null, error: "Tab not found or destroyed" };
+    }
+    const url = wc.getURL();
+    return { success: true, url };
+  } catch (e) {
+    log.error("get-current-tab-url failed:", e);
+    return { success: false, url: null, error: e.message };
+  }
+});
+
+// Find in page - start searching
+ipcMain.handle("find-in-page", async (_event, tabId, text) => {
+  try {
+    if (!tabId || !text) return { success: false };
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      info = { view: detachedTabs[tabId].view };
+    }
+    const wc = info?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return { success: false };
+    attachFoundInPageListener(wc, tabId);
+    wc.findInPage(text);
+    return { success: true };
+  } catch (e) {
+    log.error("find-in-page failed:", e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Find in page - next match
+ipcMain.handle("find-in-page-next", async (_event, tabId, text) => {
+  try {
+    if (!tabId || !text) return { success: false };
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      info = { view: detachedTabs[tabId].view };
+    }
+    const wc = info?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return { success: false };
+    wc.findInPage(text, { forward: true, findNext: true });
+    return { success: true };
+  } catch (e) {
+    log.error("find-in-page-next failed:", e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Find in page - previous match
+ipcMain.handle("find-in-page-previous", async (_event, tabId, text) => {
+  try {
+    if (!tabId || !text) return { success: false };
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      info = { view: detachedTabs[tabId].view };
+    }
+    const wc = info?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return { success: false };
+    wc.findInPage(text, { forward: false, findNext: true });
+    return { success: true };
+  } catch (e) {
+    log.error("find-in-page-previous failed:", e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Find in page - stop and clear
+ipcMain.handle("stop-find-in-page", async (_event, tabId) => {
+  try {
+    if (!tabId) return { success: false };
+    let info = webViews[tabId];
+    if (!info && detachedTabs[tabId]) {
+      info = { view: detachedTabs[tabId].view };
+    }
+    const wc = info?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return { success: false };
+    wc.stopFindInPage("clearSelection");
+    return { success: true };
+  } catch (e) {
+    log.error("stop-find-in-page failed:", e);
+    return { success: false, error: e.message };
+  }
+});
+
 // Navigate back in the specified tab if possible
 ipcMain.handle("go-back", async (_event, tabId) => {
   try {
@@ -1018,6 +1490,9 @@ ipcMain.handle("switch-tab", async (_event, tabId) => {
       return { success: false, error: "Account view not found." };
     }
     showView(tabId);
+    // Focus the webContents so keyboard shortcuts work
+    info.view.webContents.focus();
+    log.info(`[switch-tab] Focused webContents for ${tabId}`);
     return { success: true };
   } catch (e) {
     log.error("switch-tab failed:", e);
@@ -1094,7 +1569,7 @@ ipcMain.handle("show-tab-context-menu", async (_event, tabId) => {
         label: "Otevřít v novém okně",
         click: () => {
           detachTab(tabId).catch((e) =>
-            log.error("Detach from context menu failed:", e)
+            log.error("Detach from context menu failed:", e),
           );
         },
       },
@@ -1123,6 +1598,47 @@ async function detachTab(tabId) {
     info.view.webContents.isDestroyed()
   )
     throw new Error("Tab view not found.");
+
+  // Fetch current dynamic title from page before detaching
+  let currentTitle = info.name;
+  try {
+    if (info.system === "mergado") {
+      const text = await info.view.webContents.executeJavaScript(
+        `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`,
+      );
+      if (text && text.length) currentTitle = text;
+    } else if (info.system === "heureka" && info.isGroupEmail) {
+      const sel =
+        "body > div.cvr-flex.cvr-flex-col.cvr-min-h-full > header > div.cvr-flex.cvr-space-x-12 > button.cvr-flex.cvr-items-center.cvr-space-x-4 > div > span";
+      const text = await info.view.webContents.executeJavaScript(
+        `(() => { const el = document.querySelector(${JSON.stringify(sel)}); return el ? (el.textContent || '').trim() : ''; })()`,
+      );
+      if (text && text.length) currentTitle = text;
+    } else if (info.system === "google" && info.service) {
+      const googleSelectors = {
+        analytics:
+          "#suite-top-nav > gmp-header > gmp-universal-picker > button > span.mdc-button__label > div.gmp-button-text > span > span",
+        ads: "body > div:nth-child(5) > root > div > div > awsm-app-bar > div.app-bar-left._ngcontent-awn-AWSM-0 > mcc-nav-slim > mcc-picker-wrapper > mcc-nav > nav-popup-trigger > div > mcc-nav-breadcrumb > div > div.operating-customer._ngcontent-awn-AWSM-14 > span.name._ngcontent-awn-AWSM-14",
+        merchant: "accounts-menu .popup-trigger",
+      };
+      const googleSel = googleSelectors[info.service];
+      if (googleSel) {
+        if (info.service === "merchant") {
+          const text = await info.view.webContents.executeJavaScript(
+            `(() => { const el = document.querySelector(${JSON.stringify(googleSel)}); if (!el) return ''; const ariaLabel = el.getAttribute('aria-label') || ''; const match = ariaLabel.match(/:\\s*([^,]+)/); return match ? match[1].trim() : ''; })()`,
+          );
+          if (text && text.length) currentTitle = text;
+        } else {
+          const text = await info.view.webContents.executeJavaScript(
+            `(() => { const el = document.querySelector(${JSON.stringify(googleSel)}); return el ? (el.textContent || '').trim() : ''; })()`,
+          );
+          if (text && text.length) currentTitle = text;
+        }
+      }
+    }
+  } catch (e) {
+    log.warn("Failed to get current title before detach:", e);
+  }
 
   const view = info.view;
   // Remove from main window view hierarchy
@@ -1163,7 +1679,7 @@ async function detachTab(tabId) {
     y: posY,
     show: true,
     autoHideMenuBar: true,
-    title: info.title || info.name || "Tab",
+    title: currentTitle || info.name || "Tab",
     backgroundColor: "#ffffff",
   });
   // Ensure activity listeners are attached to detached window too
@@ -1214,11 +1730,13 @@ async function detachTab(tabId) {
     const qs = new URLSearchParams({
       tabId,
       name: String(info.name || "Tab"),
+      title: String(currentTitle || info.name || "Tab"),
       system: String(info.system || "heureka"),
+      service: String(info.service || ""),
     }).toString();
     if (is.dev) {
       await uiView.webContents.loadURL(
-        `${viteDevServerUrl}/detached.html?${qs}`
+        `${viteDevServerUrl}/detached.html?${qs}`,
       );
     } else {
       await uiView.webContents.loadFile(detachedPath, { search: `?${qs}` });
@@ -1227,7 +1745,7 @@ async function detachTab(tabId) {
     log.warn("Failed to load detached UI:", e);
   }
 
-  // After UI is ready, seed it with the current tab meta
+  // After UI is ready, seed it with the current tab meta and title
   try {
     const sendMeta = () => {
       try {
@@ -1238,7 +1756,15 @@ async function detachTab(tabId) {
             error: null,
             name: info.name,
             system: info.system,
+            service: info.service,
           });
+          // Also send the current title immediately
+          if (currentTitle && currentTitle.length) {
+            uiView.webContents.send("tab-title-update", {
+              tabId,
+              title: currentTitle,
+            });
+          }
         }
       } catch (_) {}
     };
@@ -1249,6 +1775,212 @@ async function detachTab(tabId) {
     });
   } catch (e) {
     log.warn("Could not seed detached UI with tab meta:", e);
+  }
+
+  // Start title watcher for detached Google tabs
+  if (info.system === "google" && info.service) {
+    const startDetachedGoogleTitleWatcher = () => {
+      try {
+        const prev = detachedTabs[tabId]?.titleTimer;
+        if (prev) clearTimeout(prev);
+      } catch (_) {}
+      let lastTitle = null;
+      const DEFAULT_TITLE = info.name;
+      const POLL_MS = 3000; // Poll every 3 seconds
+      const titleSelectors = {
+        analytics:
+          "#suite-top-nav > gmp-header > gmp-universal-picker > button > span.mdc-button__label > div.gmp-button-text > span > span",
+        ads: "body > div:nth-child(5) > root > div > div > awsm-app-bar > div.app-bar-left._ngcontent-awn-AWSM-0 > mcc-nav-slim > mcc-picker-wrapper > mcc-nav > nav-popup-trigger > div > mcc-nav-breadcrumb > div > div.operating-customer._ngcontent-awn-AWSM-14 > span.name._ngcontent-awn-AWSM-14",
+        merchant: "accounts-menu .popup-trigger",
+      };
+      const selector = titleSelectors[info.service];
+      if (!selector) return;
+
+      const poll = async () => {
+        try {
+          if (!view || !view.webContents || view.webContents.isDestroyed())
+            return;
+          if (!detachedTabs[tabId]) return; // Tab no longer detached
+          let text;
+          if (info.service === "merchant") {
+            text = await view.webContents.executeJavaScript(
+              `(() => {
+                const el = document.querySelector(${JSON.stringify(selector)});
+                if (!el) return '';
+                const ariaLabel = el.getAttribute('aria-label') || '';
+                const match = ariaLabel.match(/:\\s*([^,]+)/);
+                return match ? match[1].trim() : '';
+              })()`,
+            );
+          } else {
+            text = await view.webContents.executeJavaScript(
+              `(() => {
+                const el = document.querySelector(${JSON.stringify(selector)});
+                return el ? (el.textContent || '').trim() : '';
+              })()`,
+            );
+          }
+          const next = text && text.length ? text : DEFAULT_TITLE;
+          if (next !== lastTitle) {
+            lastTitle = next;
+            log.info(
+              `[Detached Google TitleWatcher] Title changed for ${info.service}: "${next}"`,
+            );
+            if (uiView && !uiView.webContents.isDestroyed()) {
+              uiView.webContents.send("tab-title-update", {
+                tabId,
+                title: next,
+              });
+            }
+            // Also update window title
+            if (win && !win.isDestroyed()) {
+              win.setTitle(next);
+            }
+          }
+        } catch (_) {
+          // Ignore polling errors silently
+        } finally {
+          if (
+            view &&
+            view.webContents &&
+            !view.webContents.isDestroyed() &&
+            detachedTabs[tabId]
+          ) {
+            const t = setTimeout(poll, POLL_MS);
+            if (detachedTabs[tabId]) detachedTabs[tabId].titleTimer = t;
+          }
+        }
+      };
+      poll();
+    };
+    view.webContents.on("did-finish-load", startDetachedGoogleTitleWatcher);
+    view.webContents.on(
+      "did-navigate-in-page",
+      startDetachedGoogleTitleWatcher,
+    );
+    startDetachedGoogleTitleWatcher();
+  }
+
+  // Start title watcher for detached Heureka tabs (only grouped email ones)
+  if (info.system === "heureka" && info.isGroupEmail) {
+    const startDetachedHeurekaTitleWatcher = () => {
+      try {
+        const prev = detachedTabs[tabId]?.titleTimer;
+        if (prev) clearTimeout(prev);
+      } catch (_) {}
+      let lastTitle = null;
+      const DEFAULT_TITLE = info.name || "Heureka";
+      const POLL_MS = 1000;
+      const selector =
+        "body > div.cvr-flex.cvr-flex-col.cvr-min-h-full > header > div.cvr-flex.cvr-space-x-12 > button.cvr-flex.cvr-items-center.cvr-space-x-4 > div > span";
+
+      const poll = async () => {
+        try {
+          if (!view || !view.webContents || view.webContents.isDestroyed())
+            return;
+          if (!detachedTabs[tabId]) return;
+          const text = await view.webContents.executeJavaScript(
+            `(() => {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              return el ? (el.textContent || '').trim() : '';
+            })()`,
+          );
+          const next = text && text.length ? text : DEFAULT_TITLE;
+          if (next !== lastTitle) {
+            lastTitle = next;
+            if (uiView && !uiView.webContents.isDestroyed()) {
+              uiView.webContents.send("tab-title-update", {
+                tabId,
+                title: next,
+              });
+            }
+            if (win && !win.isDestroyed()) {
+              win.setTitle(next);
+            }
+          }
+        } catch (_) {
+          // Ignore polling errors
+        } finally {
+          if (
+            view &&
+            view.webContents &&
+            !view.webContents.isDestroyed() &&
+            detachedTabs[tabId]
+          ) {
+            const t = setTimeout(poll, POLL_MS);
+            if (detachedTabs[tabId]) detachedTabs[tabId].titleTimer = t;
+          }
+        }
+      };
+      poll();
+    };
+    view.webContents.on("did-finish-load", startDetachedHeurekaTitleWatcher);
+    view.webContents.on(
+      "did-navigate-in-page",
+      startDetachedHeurekaTitleWatcher,
+    );
+    startDetachedHeurekaTitleWatcher();
+  }
+
+  // Start title watcher for detached Mergado tabs
+  if (info.system === "mergado") {
+    const startDetachedMergadoTitleWatcher = () => {
+      try {
+        const prev = detachedTabs[tabId]?.titleTimer;
+        if (prev) clearTimeout(prev);
+      } catch (_) {}
+      let lastTitle = null;
+      const DEFAULT_TITLE = "Mergado";
+      const POLL_MS = 1000;
+      const selector = "#breadcrumb > a > span";
+
+      const poll = async () => {
+        try {
+          if (!view || !view.webContents || view.webContents.isDestroyed())
+            return;
+          if (!detachedTabs[tabId]) return;
+          const text = await view.webContents.executeJavaScript(
+            `(() => {
+              const el = document.querySelector(${JSON.stringify(selector)});
+              return el ? (el.textContent || '').trim() : '';
+            })()`,
+          );
+          const next = text && text.length ? text : DEFAULT_TITLE;
+          if (next !== lastTitle) {
+            lastTitle = next;
+            if (uiView && !uiView.webContents.isDestroyed()) {
+              uiView.webContents.send("tab-title-update", {
+                tabId,
+                title: next,
+              });
+            }
+            if (win && !win.isDestroyed()) {
+              win.setTitle(next);
+            }
+          }
+        } catch (_) {
+          // Ignore polling errors
+        } finally {
+          if (
+            view &&
+            view.webContents &&
+            !view.webContents.isDestroyed() &&
+            detachedTabs[tabId]
+          ) {
+            const t = setTimeout(poll, POLL_MS);
+            if (detachedTabs[tabId]) detachedTabs[tabId].titleTimer = t;
+          }
+        }
+      };
+      poll();
+    };
+    view.webContents.on("did-finish-load", startDetachedMergadoTitleWatcher);
+    view.webContents.on(
+      "did-navigate-in-page",
+      startDetachedMergadoTitleWatcher,
+    );
+    view.webContents.on("dom-ready", startDetachedMergadoTitleWatcher);
+    startDetachedMergadoTitleWatcher();
   }
 
   // Hover-to-reattach disabled; explicit drop on TabBar is the only way.
@@ -1265,6 +1997,7 @@ async function detachTab(tabId) {
             session: sess,
             name,
             system,
+            service,
             accountId,
             isGroupEmail,
             url,
@@ -1275,6 +2008,7 @@ async function detachTab(tabId) {
             url: url || undefined,
             name,
             system,
+            service,
             accountId,
             isGroupEmail,
           };
@@ -1282,10 +2016,10 @@ async function detachTab(tabId) {
           updateMainLayout();
           try {
             const [windowWidth, windowHeight] = mainWindow.getContentSize();
-            const isMergado = system === "mergado";
-            const leftX = isMergado ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+            const isFullWidth = system === "mergado" || system === "google";
+            const leftX = isFullWidth ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
             const topY = TAB_BAR_HEIGHT;
-            const viewWidth = isMergado ? windowWidth : windowWidth - leftX;
+            const viewWidth = isFullWidth ? windowWidth : windowWidth - leftX;
             const viewHeight = isOverlayOpen
               ? 0
               : Math.max(windowHeight - topY, 0);
@@ -1299,9 +2033,9 @@ async function detachTab(tabId) {
             setTimeout(() => {
               try {
                 const [w2, h2] = mainWindow.getContentSize();
-                const vx = isMergado ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+                const vx = isFullWidth ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
                 const vy = TAB_BAR_HEIGHT;
-                const vw = isMergado ? w2 : w2 - vx;
+                const vw = isFullWidth ? w2 : w2 - vx;
                 const vh = isOverlayOpen ? 0 : Math.max(h2 - vy, 0);
                 view.setBounds({ x: vx, y: vy, width: vw, height: vh });
                 view.webContents.focus();
@@ -1310,7 +2044,7 @@ async function detachTab(tabId) {
           } catch (e) {
             log.warn(
               "Explicit sizing/focus after reattach (on close) failed:",
-              e
+              e,
             );
           }
           // Inform renderer to activate it and then recreate the tab + clear hover
@@ -1325,6 +2059,7 @@ async function detachTab(tabId) {
               error: null,
               name,
               system,
+              service,
             });
             // Immediately try to send a fresh dynamic title reflecting current page
             try {
@@ -1332,7 +2067,7 @@ async function detachTab(tabId) {
               if (system === "mergado") {
                 dynamicTitle = await view.webContents
                   .executeJavaScript(
-                    `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`
+                    `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`,
                   )
                   .catch(() => null);
                 if (dynamicTitle && dynamicTitle.length) {
@@ -1347,8 +2082,8 @@ async function detachTab(tabId) {
                 dynamicTitle = await view.webContents
                   .executeJavaScript(
                     `(() => { const el = document.querySelector(${JSON.stringify(
-                      sel
-                    )}); return el ? (el.textContent || '').trim() : ''; })()`
+                      sel,
+                    )}); return el ? (el.textContent || '').trim() : ''; })()`,
                   )
                   .catch(() => null);
                 if (dynamicTitle && dynamicTitle.length) {
@@ -1356,6 +2091,39 @@ async function detachTab(tabId) {
                     tabId,
                     title: dynamicTitle,
                   });
+                }
+              } else if (system === "google" && service) {
+                const googleSelectors = {
+                  analytics:
+                    "#suite-top-nav > gmp-header > gmp-universal-picker > button > span.mdc-button__label > div.gmp-button-text > span > span",
+                  ads: "body > div:nth-child(5) > root > div > div > awsm-app-bar > div.app-bar-left._ngcontent-awn-AWSM-0 > mcc-nav-slim > mcc-picker-wrapper > mcc-nav > nav-popup-trigger > div > mcc-nav-breadcrumb > div > div.operating-customer._ngcontent-awn-AWSM-14 > span.name._ngcontent-awn-AWSM-14",
+                  merchant: "accounts-menu .popup-trigger",
+                };
+                const googleSel = googleSelectors[service];
+                if (googleSel) {
+                  if (service === "merchant") {
+                    dynamicTitle = await view.webContents
+                      .executeJavaScript(
+                        `(() => { const el = document.querySelector(${JSON.stringify(
+                          googleSel,
+                        )}); if (!el) return ''; const ariaLabel = el.getAttribute('aria-label') || ''; const match = ariaLabel.match(/:\\s*([^,]+)/); return match ? match[1].trim() : ''; })()`,
+                      )
+                      .catch(() => null);
+                  } else {
+                    dynamicTitle = await view.webContents
+                      .executeJavaScript(
+                        `(() => { const el = document.querySelector(${JSON.stringify(
+                          googleSel,
+                        )}); return el ? (el.textContent || '').trim() : ''; })()`,
+                      )
+                      .catch(() => null);
+                  }
+                  if (dynamicTitle && dynamicTitle.length) {
+                    reactUiView.webContents.send("tab-title-update", {
+                      tabId,
+                      title: dynamicTitle,
+                    });
+                  }
                 }
               }
             } catch (e) {
@@ -1405,6 +2173,7 @@ async function detachTab(tabId) {
     url: info.url,
     name: info.name,
     system: info.system,
+    service: info.service,
     accountId: info.accountId,
     isGroupEmail: info.isGroupEmail,
     titleTimer: info.titleTimer,
@@ -1453,6 +2222,7 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
         session: sess,
         name,
         system,
+        service,
         accountId,
         isGroupEmail,
         url,
@@ -1476,6 +2246,7 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
         url: url || undefined,
         name,
         system,
+        service,
         accountId,
         isGroupEmail,
       };
@@ -1483,10 +2254,10 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
       updateMainLayout();
       try {
         const [windowWidth, windowHeight] = mainWindow.getContentSize();
-        const isMergado = system === "mergado";
-        const leftX = isMergado ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+        const isFullWidth = system === "mergado" || system === "google";
+        const leftX = isFullWidth ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
         const topY = TAB_BAR_HEIGHT;
-        const viewWidth = isMergado ? windowWidth : windowWidth - leftX;
+        const viewWidth = isFullWidth ? windowWidth : windowWidth - leftX;
         const viewHeight = isOverlayOpen ? 0 : Math.max(windowHeight - topY, 0);
         view.setBounds({
           x: leftX,
@@ -1495,6 +2266,18 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
           height: viewHeight,
         });
         view.webContents.focus();
+        // Delayed re-layout to ensure proper sizing after attach
+        setTimeout(() => {
+          try {
+            const [w2, h2] = mainWindow.getContentSize();
+            const vx = isFullWidth ? 0 : Math.max(SIDEBAR_WIDTH || 0, 0);
+            const vy = TAB_BAR_HEIGHT;
+            const vw = isFullWidth ? w2 : w2 - vx;
+            const vh = isOverlayOpen ? 0 : Math.max(h2 - vy, 0);
+            view.setBounds({ x: vx, y: vy, width: vw, height: vh });
+            view.webContents.focus();
+          } catch (_) {}
+        }, 50);
       } catch (_) {}
 
       // Notify UIs: add/activate the tab and broadcast status/title
@@ -1509,6 +2292,7 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
           error: null,
           name,
           system,
+          service,
         });
         // Try to send a fresh dynamic title
         try {
@@ -1516,7 +2300,7 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
           if (system === "mergado") {
             dynamicTitle = await view.webContents
               .executeJavaScript(
-                `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`
+                `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`,
               )
               .catch(() => null);
           } else if (system === "heureka" && isGroupEmail) {
@@ -1525,10 +2309,38 @@ ipcMain.handle("attach-detached-tab-here", async (event, payload) => {
             dynamicTitle = await view.webContents
               .executeJavaScript(
                 `(() => { const el = document.querySelector(${JSON.stringify(
-                  sel
-                )}); return el ? (el.textContent || '').trim() : ''; })()`
+                  sel,
+                )}); return el ? (el.textContent || '').trim() : ''; })()`,
               )
               .catch(() => null);
+          } else if (system === "google" && service) {
+            const googleSelectors = {
+              analytics:
+                "#suite-top-nav > gmp-header > gmp-universal-picker > button > span.mdc-button__label > div.gmp-button-text > span > span",
+              ads: "body > div:nth-child(5) > root > div > div > awsm-app-bar > div.app-bar-left._ngcontent-awn-AWSM-0 > mcc-nav-slim > mcc-picker-wrapper > mcc-nav > nav-popup-trigger > div > mcc-nav-breadcrumb > div > div.operating-customer._ngcontent-awn-AWSM-14 > span.name._ngcontent-awn-AWSM-14",
+              merchant:
+                "body > div:nth-child(2) > root > app-bar > div > div.no-print.account-picker-container._ngcontent-bxj-6 > accounts-menu > div > div.popup-trigger._ngcontent-bxj-7",
+            };
+            const googleSel = googleSelectors[service];
+            if (googleSel) {
+              if (service === "merchant") {
+                dynamicTitle = await view.webContents
+                  .executeJavaScript(
+                    `(() => { const el = document.querySelector(${JSON.stringify(
+                      googleSel,
+                    )}); if (!el) return ''; const ariaLabel = el.getAttribute('aria-label') || ''; const match = ariaLabel.match(/:\\s*([^,]+)/); return match ? match[1].trim() : ''; })()`,
+                  )
+                  .catch(() => null);
+              } else {
+                dynamicTitle = await view.webContents
+                  .executeJavaScript(
+                    `(() => { const el = document.querySelector(${JSON.stringify(
+                      googleSel,
+                    )}); return el ? (el.textContent || '').trim() : ''; })()`,
+                  )
+                  .catch(() => null);
+              }
+            }
           }
           if (dynamicTitle && dynamicTitle.length) {
             broadcastTabUi(tabId, "tab-title-update", {
@@ -1578,7 +2390,7 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
   const isGroupEmail = !!accountInfo?.tabTitle; // true when the email has multiple accounts (grouped)
 
   log.info(
-    `IPC: Request to open/select account ID: ${accountId} (${accountName}), country: ${clientCountry}`
+    `IPC: Request to open/select account ID: ${accountId} (${accountName}), country: ${clientCountry}`,
   );
 
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1616,6 +2428,10 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
     },
   });
   const webContents = newView.webContents;
+
+  // Attach keyboard shortcut listener for this webContents
+  attachKeyboardShortcutListener(webContents);
+
   const sendStatus = (status, error = null) => {
     broadcastTabUi(tabId, "tab-status-update", {
       tabId,
@@ -1630,7 +2446,7 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
     "did-start-navigation",
     (event, url, isInPlace, isMainFrame) => {
       if (isMainFrame) sendStatus("loading");
-    }
+    },
   );
   webContents.on("did-finish-load", () => sendStatus("ready"));
   webContents.on(
@@ -1639,7 +2455,7 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
       if (isMainFrame && errorCode !== -3) {
         sendStatus("error", errorDescription || `Error code: ${errorCode}`);
       }
-    }
+    },
   );
 
   // Start a poller to pick current label from Heureka header only for grouped-email tabs
@@ -1666,7 +2482,7 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
             const sel = "body > div.cvr-flex.cvr-flex-col.cvr-min-h-full > header > div.cvr-flex.cvr-space-x-12 > button.cvr-flex.cvr-items-center.cvr-space-x-4 > div > span";
             const el = document.querySelector(sel);
             return el ? (el.textContent || '').trim() : '';
-          })()`
+          })()`,
         );
         const next = text && text.length ? text : DEFAULT_TITLE;
         if (next !== lastTitle) {
@@ -1719,13 +2535,9 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
   // Let renderer know it's loading
   sendStatus("loading");
 
-  // Load the local full-screen loader immediately
+  // Load the simple loader immediately
   try {
-    const rendererRoot = app.isPackaged
-      ? path.join("../dist/renderer")
-      : path.join("../renderer");
-    const loaderPath = path.join(__dirname, rendererRoot, "loading.html");
-    await newView.webContents.loadFile(loaderPath);
+    await showLocalLoader(newView.webContents);
   } catch (e) {
     log.warn(`Could not load local loader for Heureka [${accountId}]:`, e);
   }
@@ -1761,8 +2573,11 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
               httpOnly,
             })
             .catch((err) =>
-              log.error(`[${accountId}] Err setting API cookie '${name}':`, err)
-            )
+              log.error(
+                `[${accountId}] Err setting API cookie '${name}':`,
+                err,
+              ),
+            ),
         );
       }
     } else {
@@ -1785,9 +2600,9 @@ ipcMain.handle("select-account", async (_event, accountInfo) => {
           .catch((err) =>
             log.error(
               `[${accountId}] Err setting Consent cookie '${name}':`,
-              err
-            )
-          )
+              err,
+            ),
+          ),
       );
     }
 
@@ -1842,6 +2657,9 @@ ipcMain.handle("fetch-mergado", async () => {
       },
     });
 
+    // Attach keyboard shortcut listener for this webContents
+    attachKeyboardShortcutListener(mergadoView.webContents);
+
     // Open DevTools to help inspect selectors in Mergado
     try {
       mergadoView.webContents.openDevTools({ mode: "detach" });
@@ -1872,7 +2690,7 @@ ipcMain.handle("fetch-mergado", async () => {
     const allCookiePromises = [];
     if (rrCookiesObject && typeof rrCookiesObject === "object") {
       log.info(
-        `Setting ${Object.keys(rrCookiesObject).length} Mergado cookies.`
+        `Setting ${Object.keys(rrCookiesObject).length} Mergado cookies.`,
       );
       for (const name in rrCookiesObject) {
         const value = String(rrCookiesObject[name]);
@@ -1888,7 +2706,7 @@ ipcMain.handle("fetch-mergado", async () => {
         allCookiePromises.push(
           newSession.cookies.set(details).catch((err) => {
             log.error(`[Mergado] Err setting cookie '${name}':`, err);
-          })
+          }),
         );
       }
     }
@@ -1897,7 +2715,7 @@ ipcMain.handle("fetch-mergado", async () => {
     await mergadoView.webContents.loadURL(targetUrl);
     // Wait for DOMContentLoaded
     await new Promise((resolve) =>
-      mergadoView.webContents.once("dom-ready", resolve)
+      mergadoView.webContents.once("dom-ready", resolve),
     );
     // Remove the target element reliably (immediate + MutationObserver, 20s timeout)
     const removalSucceeded = await mergadoView.webContents.executeJavaScript(`
@@ -1938,7 +2756,7 @@ ipcMain.handle("fetch-mergado", async () => {
     } catch (e) {
       log.warn(
         "clearHistory after initial load failed (Mergado standalone):",
-        e
+        e,
       );
     }
 
@@ -1962,6 +2780,307 @@ ipcMain.handle("fetch-mergado", async () => {
     if (reactUiView && !mainWindow.contentView.children.includes(reactUiView)) {
       mainWindow.contentView.addChildView(reactUiView);
     }
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("fetch-google-credentials", async (_event, payload) => {
+  log.info("IPC: fetch-google-credentials called.");
+  try {
+    const email = payload?.email;
+    const result = await fetchGoogleCredentials(email);
+    // User requested output in terminal -> log in main process
+    // Use console.log so it shows up even if electron-log routing differs.
+    console.log("[Google credentials] Response:", result?.data);
+    return { success: true, data: result?.data, debug: result?.debugAttempts };
+  } catch (error) {
+    log.error("IPC: fetch-google-credentials failed:", error);
+    const msg = error?.message || String(error);
+    console.log("[Google credentials] Error:", msg);
+    return {
+      success: false,
+      error: msg,
+      debug: error?.debugAttempts || null,
+    };
+  }
+});
+
+// Open Google (Analytics/Ads) as a tabbed view with pre-set cookies
+ipcMain.handle("open-google-tab", async (_event, payload) => {
+  const { service, email, cookies, userAgent } = payload || {};
+  log.info(`IPC: open-google-tab called. service=${service}, email=${email}`);
+
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error("Main window is not available.");
+    }
+    // Activate main layout if not already active
+    if (!isMainLayoutActive) {
+      log.info("open-google-tab: Activating main layout...");
+      isMainLayoutActive = true;
+      updateMainLayout();
+    }
+
+    // Determine target URL based on service
+    const serviceUrls = {
+      analytics: "https://analytics.google.com/",
+      ads: "https://ads.google.com/aw/overview",
+      merchant: "https://merchants.google.com/",
+    };
+    const targetUrl = serviceUrls[service];
+    if (!targetUrl) {
+      throw new Error(`Unknown Google service: ${service}`);
+    }
+
+    const serviceNames = {
+      analytics: "Google Analytics",
+      ads: "Google Ads",
+      merchant: "Google Merchant Center",
+    };
+    const serviceName = serviceNames[service] || `Google ${service}`;
+
+    // Create unique id and session partition per Google tab
+    const uniqueId = `google-${service}-${Date.now()}-${Math.floor(
+      Math.random() * 1e6,
+    )}`;
+    const partition = `persist:${uniqueId}`;
+    const newSession = session.fromPartition(partition);
+
+    // Configure session to accept all cookies
+    newSession.webRequest.onHeadersReceived((details, callback) => {
+      // Remove any cookie blocking headers
+      const responseHeaders = { ...details.responseHeaders };
+      callback({ responseHeaders });
+    });
+
+    // Create the view
+    const newView = new WebContentsView({
+      webPreferences: {
+        session: newSession,
+        sandbox: false, // Disable sandbox to allow better cookie handling
+        contextIsolation: false,
+        devTools: false,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+      },
+    });
+
+    const webContents = newView.webContents;
+
+    // Attach keyboard shortcut listener for this webContents
+    attachKeyboardShortcutListener(webContents);
+
+    const sendStatus = (status, error = null) => {
+      broadcastTabUi(uniqueId, "tab-status-update", {
+        tabId: uniqueId,
+        status,
+        error,
+        name: serviceName,
+        system: "google",
+        service,
+      });
+    };
+
+    webContents.on(
+      "did-start-navigation",
+      (event, url, isInPlace, isMainFrame) => {
+        if (isMainFrame) sendStatus("loading");
+      },
+    );
+    webContents.on("did-finish-load", () => sendStatus("ready"));
+    webContents.on(
+      "did-fail-load",
+      (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (isMainFrame && errorCode !== -3) {
+          sendStatus("error", errorDescription || `Error code: ${errorCode}`);
+        }
+      },
+    );
+
+    // Set user agent BEFORE any navigation
+    if (userAgent) {
+      webContents.setUserAgent(userAgent);
+    }
+
+    // Set cookies BEFORE showing any content (important for Google auth)
+    log.info(`[Google] Setting cookies before navigation...`);
+    if (cookies && typeof cookies === "object") {
+      const cookiePromises = [];
+      log.info(
+        `[Google] Received ${Object.keys(cookies).length} cookies from API`,
+      );
+
+      for (const [key, cookieData] of Object.entries(cookies)) {
+        // Cookie name can be in cookieData.name or parse from key (format: "COOKIE_domain.com")
+        const cookieName = cookieData.name || key.split("_")[0];
+        const originalDomain = cookieData.domain || ".google.com";
+        const urlDomain = originalDomain.replace(/^\./, "");
+        const isSecure = cookieData.secure === true;
+
+        log.info(
+          `[Google] Setting cookie: ${cookieName} for domain ${originalDomain}`,
+        );
+
+        const details = {
+          url: `https://${urlDomain}`,
+          name: cookieName,
+          value: String(cookieData.value || ""),
+          domain: originalDomain,
+          path: cookieData.path || "/",
+          secure: isSecure,
+          httpOnly: !!cookieData.httpOnly,
+        };
+        if (isSecure) {
+          details.sameSite = "no_restriction";
+        }
+        if (cookieData.expiry) {
+          details.expirationDate = cookieData.expiry;
+        }
+
+        cookiePromises.push(
+          newSession.cookies.set(details).catch((err) => {
+            log.error(
+              `[Google] Error setting cookie '${cookieName}' for ${originalDomain}:`,
+              err.message,
+            );
+          }),
+        );
+      }
+      await Promise.all(cookiePromises);
+      log.info(`[Google] Cookies set successfully`);
+
+      // Log all cookies in session
+      const allCookies = await newSession.cookies.get({});
+      log.info(`[Google] Session has ${allCookies.length} cookies total`);
+      for (const c of allCookies) {
+        log.info(`[Google]   - ${c.name} @ ${c.domain}`);
+      }
+    } else {
+      log.warn("No cookies provided for Google tab.");
+    }
+
+    // NOW register in webViews and show
+    webViews[uniqueId] = {
+      view: newView,
+      session: newSession,
+      url: targetUrl,
+      name: serviceName,
+      system: "google",
+      service,
+      email,
+    };
+    showView(uniqueId);
+    updateMainLayout();
+
+    // Show loader
+    sendStatus("loading");
+    await showLocalLoader(webContents);
+
+    // Load the target URL directly - cookies should handle authentication
+    log.info(`Loading ${targetUrl}...`);
+    await webContents.loadURL(targetUrl);
+
+    // Log final URL after any redirects
+    log.info(`[Google] Loaded, final URL: ${webContents.getURL()}`);
+
+    // Start title watcher to extract account name from Google page
+    const startGoogleTitleWatcher = () => {
+      try {
+        const prev = webViews[uniqueId]?.titleTimer;
+        if (prev) clearTimeout(prev);
+      } catch (_) {}
+      let lastTitle = null;
+      const DEFAULT_TITLE = serviceName;
+      const POLL_MS = 3000; // Poll every 3 seconds
+
+      // Selectors for each Google service
+      const titleSelectors = {
+        analytics:
+          "#suite-top-nav > gmp-header > gmp-universal-picker > button > span.mdc-button__label > div.gmp-button-text > span > span",
+        ads: "body > div:nth-child(5) > root > div > div > awsm-app-bar > div.app-bar-left._ngcontent-awn-AWSM-0 > mcc-nav-slim > mcc-picker-wrapper > mcc-nav > nav-popup-trigger > div > mcc-nav-breadcrumb > div > div.operating-customer._ngcontent-awn-AWSM-14 > span.name._ngcontent-awn-AWSM-14",
+        merchant: "accounts-menu .popup-trigger",
+      };
+      const selector = titleSelectors[service];
+      if (!selector) return;
+
+      const poll = async () => {
+        try {
+          if (
+            !newView ||
+            !newView.webContents ||
+            newView.webContents.isDestroyed()
+          ) {
+            return;
+          }
+          let text;
+          if (service === "merchant") {
+            // For Merchant Center, extract from aria-label attribute
+            text = await newView.webContents.executeJavaScript(
+              `(() => {
+                const el = document.querySelector(${JSON.stringify(selector)});
+                if (!el) return '';
+                const ariaLabel = el.getAttribute('aria-label') || '';
+                // aria-label format: "Účet Merchant Center: artmie.cz, 110664267"
+                const match = ariaLabel.match(/:\\s*([^,]+)/);  
+                return match ? match[1].trim() : '';
+              })()`,
+            );
+          } else {
+            text = await newView.webContents.executeJavaScript(
+              `(() => {
+                const el = document.querySelector(${JSON.stringify(selector)});
+                return el ? (el.textContent || '').trim() : '';
+              })()`,
+            );
+          }
+          const next = text && text.length ? text : DEFAULT_TITLE;
+          if (next !== lastTitle) {
+            lastTitle = next;
+            log.info(
+              `[Google TitleWatcher] Title changed for ${service}: "${next}"`,
+            );
+            broadcastTabUi(uniqueId, "tab-title-update", {
+              tabId: uniqueId,
+              title: next,
+            });
+          }
+        } catch (err) {
+          // Ignore polling errors silently
+        } finally {
+          if (
+            newView &&
+            newView.webContents &&
+            !newView.webContents.isDestroyed()
+          ) {
+            const t = setTimeout(poll, POLL_MS);
+            if (webViews[uniqueId]) webViews[uniqueId].titleTimer = t;
+          }
+        }
+      };
+      poll();
+    };
+    webContents.on("did-finish-load", startGoogleTitleWatcher);
+    webContents.on("did-navigate-in-page", startGoogleTitleWatcher);
+    // Start immediately since page is already loaded
+    startGoogleTitleWatcher();
+
+    // Clear history so loader isn't in back navigation
+    try {
+      if (typeof webContents.clearHistory === "function") {
+        webContents.clearHistory();
+      }
+    } catch (e) {
+      log.warn("clearHistory after Google load failed:", e);
+    }
+
+    log.info(`Google ${service} tab opened successfully.`);
+    return {
+      success: true,
+      id: uniqueId,
+      name: serviceName,
+    };
+  } catch (error) {
+    log.error("IPC: open-google-tab failed:", error);
     return { success: false, error: error.message };
   }
 });
@@ -2006,7 +3125,7 @@ ipcMain.handle("open-mergado-tab", async () => {
       "did-start-navigation",
       (event, url, isInPlace, isMainFrame) => {
         if (isMainFrame) sendStatus("loading");
-      }
+      },
     );
     webContents.on("did-finish-load", () => sendStatus("ready"));
     // Inject removal script after each load to ensure the user menu element is removed
@@ -2039,7 +3158,7 @@ ipcMain.handle("open-mergado-tab", async () => {
       (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
         if (isMainFrame && errorCode !== -3)
           sendStatus("error", errorDescription || `Error code: ${errorCode}`);
-      }
+      },
     );
 
     // Watch breadcrumb span and send dynamic tab title updates
@@ -2059,7 +3178,7 @@ ipcMain.handle("open-mergado-tab", async () => {
           )
             return;
           const text = await newView.webContents.executeJavaScript(
-            `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`
+            `(() => { const el = document.querySelector('#breadcrumb > a > span'); return el ? (el.textContent || '').trim() : ''; })()`,
           );
           const next = text && text.length ? text : "Mergado";
           if (next !== lastTitle) {
@@ -2102,7 +3221,7 @@ ipcMain.handle("open-mergado-tab", async () => {
     sendStatus("loading");
     // Show loader right away (no await to avoid delaying the IPC response)
     showLocalLoader(newView.webContents).catch((e) =>
-      log.warn("Could not show local loader for Mergado (tabbed):", e)
+      log.warn("Could not show local loader for Mergado (tabbed):", e),
     );
 
     // Continue heavy work asynchronously to return early
@@ -2113,12 +3232,12 @@ ipcMain.handle("open-mergado-tab", async () => {
           newSession
             .clearStorageData()
             .catch((e) =>
-              log.error("Failed to clear Mergado session storage:", e)
+              log.error("Failed to clear Mergado session storage:", e),
             ),
           newSession
             .clearCache()
             .catch((e) =>
-              log.error("Failed to clear Mergado session cache:", e)
+              log.error("Failed to clear Mergado session cache:", e),
             ),
         ]);
         const mergadoData = await fetchMergadoCookies();
@@ -2144,8 +3263,8 @@ ipcMain.handle("open-mergado-tab", async () => {
             newSession.cookies
               .set(details)
               .catch((err) =>
-                log.error(`[MergadoTab] Err setting cookie '${name}':`, err)
-              )
+                log.error(`[MergadoTab] Err setting cookie '${name}':`, err),
+              ),
           );
         }
         await Promise.all(allCookiePromises);
@@ -2178,6 +3297,209 @@ ipcMain.handle("open-mergado-tab", async () => {
 // --- Application Lifecycle ---
 app.whenReady().then(async () => {
   log.info("App is ready.");
+
+  // Setup application menu with keyboard shortcuts
+  // This allows capturing Cmd+Left/Right on macOS which would otherwise be handled by the system
+  const isMac = process.platform === "darwin";
+  const menuTemplate = [
+    // App menu (macOS only)
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          },
+        ]
+      : []),
+    // Edit menu (for copy/paste to work)
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    // View menu with tab navigation
+    {
+      label: "View",
+      submenu: [
+        {
+          label: "Previous Tab",
+          accelerator: isMac ? "Cmd+Left" : "Ctrl+Left",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'prevTab' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "prevTab",
+              });
+            }
+          },
+        },
+        {
+          label: "Next Tab",
+          accelerator: isMac ? "Cmd+Right" : "Ctrl+Right",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'nextTab' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "nextTab",
+              });
+            }
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Find",
+          accelerator: "CmdOrCtrl+F",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'find' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "find",
+              });
+              reactUiView.webContents.focus();
+            }
+          },
+        },
+        {
+          label: "Refresh",
+          accelerator: "CmdOrCtrl+R",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'refresh' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "refresh",
+              });
+            }
+          },
+        },
+        { type: "separator" },
+        {
+          label: "New Tab",
+          accelerator: "CmdOrCtrl+T",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'newTab' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "newTab",
+              });
+              reactUiView.webContents.focus();
+            }
+          },
+        },
+        {
+          label: "Go Home",
+          accelerator: "Alt+H",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'home' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "home",
+              });
+            }
+          },
+        },
+        {
+          label: "Copy URL",
+          accelerator: "CmdOrCtrl+Shift+C",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'copyUrl' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "copyUrl",
+              });
+            }
+          },
+        },
+        {
+          label: "Go Back",
+          accelerator: "CmdOrCtrl+Backspace",
+          click: () => {
+            if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+              log.info("[Menu] Sending 'back' action to React UI");
+              reactUiView.webContents.send("keyboard-shortcut", {
+                action: "back",
+              });
+            }
+          },
+        },
+      ],
+    },
+    // Window menu
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(isMac
+          ? [{ type: "separator" }, { role: "front" }]
+          : [{ role: "close" }]),
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
+  log.info("Application menu with shortcuts configured.");
+
+  // Register global shortcuts for Cmd+Left/Right (menu accelerators don't work for these on macOS)
+  if (isMac) {
+    const leftRegistered = globalShortcut.register("Command+Left", () => {
+      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+        log.info("[GlobalShortcut] Sending 'prevTab' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "prevTab",
+        });
+      }
+    });
+    const rightRegistered = globalShortcut.register("Command+Right", () => {
+      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+        log.info("[GlobalShortcut] Sending 'nextTab' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "nextTab",
+        });
+      }
+    });
+    log.info(
+      `Global shortcuts for Cmd+Left/Right registered: Left=${leftRegistered}, Right=${rightRegistered}`,
+    );
+  } else {
+    const leftRegistered = globalShortcut.register("Control+Left", () => {
+      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+        log.info("[GlobalShortcut] Sending 'prevTab' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "prevTab",
+        });
+      }
+    });
+    const rightRegistered = globalShortcut.register("Control+Right", () => {
+      if (reactUiView && !reactUiView.webContents.isDestroyed()) {
+        log.info("[GlobalShortcut] Sending 'nextTab' action to React UI");
+        reactUiView.webContents.send("keyboard-shortcut", {
+          action: "nextTab",
+        });
+      }
+    });
+    log.info(
+      `Global shortcuts for Ctrl+Left/Right registered: Left=${leftRegistered}, Right=${rightRegistered}`,
+    );
+  }
+
   createWindow().catch((error) => {
     log.error("Unhandled error during createWindow execution:", error);
   });
@@ -2220,7 +3542,7 @@ app.on("activate", () => {
     createWindow().catch((error) => {
       log.error(
         "Unhandled error during createWindow execution on activate:",
-        error
+        error,
       );
     });
   }
@@ -2228,6 +3550,8 @@ app.on("activate", () => {
 
 app.on("window-all-closed", () => {
   log.info("All windows closed.");
+  // Odregistrovat globalShortcuts
+  globalShortcut.unregisterAll();
   if (process.platform !== "darwin") {
     log.info("Quitting app...");
     app.quit();

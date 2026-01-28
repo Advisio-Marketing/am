@@ -1,0 +1,74 @@
+.findBar {
+  position: fixed;
+  top: 45px; /* Below TabBar */
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 6px 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 2147483647; /* Maximum z-index to stay above native WebContentsView */
+}
+
+.findInput {
+  width: 200px;
+  padding: 6px 10px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #1e1e1e;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+}
+
+.findInput:focus {
+  border-color: #007acc;
+}
+
+.findInput::placeholder {
+  color: #888;
+}
+
+.matchCount {
+  min-width: 50px;
+  text-align: center;
+  color: #aaa;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+.findBtn,
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #ccc;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.findBtn:hover:not(:disabled),
+.closeBtn:hover {
+  background: #444;
+  color: #fff;
+}
+
+.findBtn:disabled {
+  color: #555;
+  cursor: not-allowed;
+}
+
+.closeBtn:hover {
+  background: #c0392b;
+  color: #fff;
+}

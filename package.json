@@ -77,7 +77,7 @@
           ]
         }
       ],
-      "icon": "renderer/public/img/logos/easy-access-logo.ico",
+      "icon": "renderer/public/img/logos/app-icon.ico",
       "artifactName": "am.${ext}"
     },
     "mac": {
@@ -89,7 +89,7 @@
           ]
         }
       ],
-      "icon": "renderer/public/img/logos/easy-access-logo.icns",
+      "icon": "renderer/public/img/logos/app-icon.icns",
       "artifactName": "am.${ext}"
     },
     "linux": {
@@ -107,7 +107,7 @@
           ]
         }
       ],
-      "icon": "renderer/public/img/logos/easy-access-logo.icns",
+      "icon": "renderer/public/img/logos/app-icon.icns",
       "artifactName": "AM ${version} ${arch}.${ext}"
     }
   }

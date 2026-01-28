@@ -24,13 +24,16 @@ function DetachedApp() {
       const usp = new URLSearchParams(window.location.search || "");
       const initId = usp.get("tabId");
       const initName = usp.get("name");
+      const initTitle = usp.get("title");
       const initSystem = usp.get("system");
+      const initService = usp.get("service");
       if (initId) {
         setTab({
           id: initId,
           name: initName || "Tab",
-          title: initName || "Tab",
+          title: initTitle || initName || "Tab",
           system: initSystem || "heureka",
+          service: initService || undefined,
           status: "ready",
         });
       }
@@ -41,21 +44,22 @@ function DetachedApp() {
   useEffect(() => {
     if (!api?.onTabStatusUpdate) return;
     const offStatus = api.onTabStatusUpdate(
-      ({ tabId, status, name, system }) => {
+      ({ tabId, status, name, system, service }) => {
         setTab((prev) => ({
           id: tabId,
           name: name || prev?.name || "Tab",
           title: prev?.title || name || "Tab",
           system: system || prev?.system || "heureka",
+          service: service || prev?.service || undefined,
           status,
         }));
-      }
+      },
     );
     const offTitle = api.onTabTitleUpdate?.(({ tabId, title }) => {
       setTab((prev) =>
         prev && prev.id === tabId
           ? { ...prev, title: title && title.length ? title : prev.name }
-          : prev
+          : prev,
       );
     });
     return () => {
@@ -92,11 +96,12 @@ function DetachedApp() {
               title: tab.title,
               kind: "account",
               system: tab.system,
+              service: tab.service,
               status: tab.status || "ready",
             },
           ]
         : [],
-    [tab]
+    [tab],
   );
 
   const onSwitchTab = useCallback(() => {}, []);
@@ -149,5 +154,5 @@ function DetachedApp() {
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <DetachedApp />
-  </React.StrictMode>
+  </React.StrictMode>,
 );

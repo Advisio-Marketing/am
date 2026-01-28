@@ -1,97 +1,134 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="cs">
   <head>
     <meta charset="utf-8" />
     <title>Načítání…</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      :root {
-        --glass-bg: rgba(255, 255, 255, 0.9);
-        --glass-text: #333;
-      }
       html,
       body {
         height: 100%;
-      }
-      body {
         margin: 0;
+      }
+      .overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #20394a;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #f5f7fb; /* simple, clean background */
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-        color: var(--glass-text);
-        overflow: hidden;
+        z-index: 9999;
       }
-      .card {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding: 14px 18px;
-        background: var(--glass-bg);
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-      }
-      .logo {
-        width: 20px;
-        height: 20px;
-        flex: 0 0 auto;
-        filter: grayscale(30%);
-        opacity: 0.85;
-      }
-      .title {
-        font-size: 16px;
-        font-weight: 600;
-        letter-spacing: 0.2px;
-      }
-      .dots {
-        display: inline-block;
-        width: 22px;
-        text-align: left;
-      }
-      .dots span {
-        display: inline-block;
-        width: 4px;
-        height: 4px;
-        margin-left: 3px;
-        background: #666;
-        opacity: 0.25;
-        animation: pulse 1.4s infinite ease-in-out;
-      }
-      .dots span:nth-child(1) {
-        animation-delay: 0s;
-      }
-      .dots span:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-      .dots span:nth-child(3) {
-        animation-delay: 0.4s;
-      }
-      @keyframes pulse {
+      @keyframes animationA {
         0%,
+        10% {
+          opacity: 0;
+        }
+        40%,
+        60% {
+          opacity: 1;
+        }
+        90%,
         100% {
-          opacity: 0.25;
-          transform: translateY(0);
+          opacity: 0;
         }
-        50% {
-          opacity: 0.9;
-          transform: translateY(-2px);
+      }
+      @keyframes animationLeft {
+        0% {
+          transform: translateY(-50%) translateX(-120px);
+          opacity: 0;
         }
+        40%,
+        60% {
+          transform: translateY(-50%) translateX(0);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(-50%) translateX(-120px);
+          opacity: 0;
+        }
+      }
+      @keyframes animationRight {
+        0% {
+          transform: translateY(-50%) translateX(120px);
+          opacity: 0;
+        }
+        40%,
+        60% {
+          transform: translateY(-50%) translateX(0);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(-50%) translateX(120px);
+          opacity: 0;
+        }
+      }
+      .advisio-loading-container {
+        width: 200px;
+        height: 102px;
+        position: relative;
+      }
+      .advisio-loading-shared {
+        position: absolute;
+        top: 50%;
+      }
+      .advisio-bracket-left {
+        left: 20px;
+        animation: animationLeft 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+      .advisio-a {
+        left: 50%;
+        transform: translate(-50%, -50%);
+        animation: animationA 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+      }
+      .advisio-bracket-right {
+        right: 0;
+        animation: animationRight 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
       }
     </style>
   </head>
   <body>
-    <div class="card" role="status" aria-live="polite" aria-label="Načítání">
-      <img
-        class="logo"
-        src="./public/img/logos/advisio_logo.svg"
-        alt="Advisio"
-      />
-      <div class="title">Načítání</div>
-      <div class="dots" aria-hidden="true">
-        <span></span><span></span><span></span>
+    <div class="overlay" role="status" aria-live="polite" aria-label="Načítání">
+      <div class="advisio-loading-container">
+        <svg
+          class="advisio-bracket-left advisio-loading-shared"
+          xmlns="http://www.w3.org/2000/svg"
+          width="44.732"
+          height="102"
+          viewBox="0 0 22.366 51"
+        >
+          <path
+            fill="#e7302a"
+            d="M12.598 48.442H3.703l9.768-45.884h8.894L22.91 0H11.4L.544 51h11.512z"
+          />
+        </svg>
+        <svg
+          class="advisio-a advisio-loading-shared"
+          xmlns="http://www.w3.org/2000/svg"
+          width="82.922"
+          height="77.914"
+          viewBox="0 0 41.461 38.957"
+        >
+          <path
+            fill="#e7302a"
+            d="m26.788 13.638-.252-2.251a92.936 92.936 0 0 1-.373-3.957c-.04-.623-.07-1.264-.09-1.919a34.03 34.03 0 0 1-.801 1.825 52.171 52.171 0 0 1-.854 1.705c-.303.578-.635 1.19-1 1.838l-1.266 2.252-5.408 9.672h11.035zm-11.91 12.5-2.663 4.899a11.43 11.43 0 0 0-.786 1.732 4.19 4.19 0 0 0-.254 1.334c-.04.592.244 1.16.746 1.477a4.483 4.483 0 0 0 2.318.467h1.092l-.613 2.904H.544l.586-2.904h1.148c.446 0 .891-.05 1.319-.174.412-.133.79-.355 1.106-.651a7.653 7.653 0 0 0 1.104-1.306c.382-.549.821-1.25 1.319-2.1L25.644 0h7.462l4.582 32.136c.08.532.2 1.058.36 1.571.132.443.334.861.6 1.24.244.344.569.622.946.812.444.21.933.311 1.425.293h.986l-.586 2.905H23.403l.586-2.905h1.252a6.11 6.11 0 0 0 2.801-.546 1.834 1.834 0 0 0 1.039-1.745c0-.3-.01-.601-.03-.894a19.25 19.25 0 0 0-.08-.84l-.826-5.888H14.873z"
+          />
+        </svg>
+        <svg
+          class="advisio-bracket-right advisio-loading-shared"
+          xmlns="http://www.w3.org/2000/svg"
+          width="44.654"
+          height="102.002"
+          viewBox="0 0 22.327 51.001"
+        >
+          <path
+            fill="#e7302a"
+            d="m11.4 0-.545 2.559h8.857L9.944 48.444H1.088l-.544 2.557h11.471l10.856-51H11.4z"
+          />
+        </svg>
       </div>
     </div>
   </body>

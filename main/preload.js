@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Google Authentication
   googleAuth: () => ipcRenderer.invoke("google-auth"),
 
+  // Google credentials (Advisio API)
+  fetchGoogleCredentials: (email) =>
+    ipcRenderer.invoke("fetch-google-credentials", { email }),
+
   // Po kliknutí na úvodní tlačítko
   fetchAccountListHeureka: () =>
     ipcRenderer.invoke("fetch-account-list-heureka"),
@@ -101,9 +105,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Navigation: back in current tab
   canGoBack: (tabId) => ipcRenderer.invoke("can-go-back", tabId),
   goBack: (tabId) => ipcRenderer.invoke("go-back", tabId),
+  getCurrentTabUrl: (tabId) => ipcRenderer.invoke("get-current-tab-url", tabId),
+
+  // Find in page
+  findInPage: (tabId, text) => ipcRenderer.invoke("find-in-page", tabId, text),
+  findInPageNext: (tabId, text) =>
+    ipcRenderer.invoke("find-in-page-next", tabId, text),
+  findInPagePrevious: (tabId, text) =>
+    ipcRenderer.invoke("find-in-page-previous", tabId, text),
+  stopFindInPage: (tabId) => ipcRenderer.invoke("stop-find-in-page", tabId),
+  onFindInPageResult: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("find-in-page-result", listener);
+    return () => ipcRenderer.removeListener("find-in-page-result", listener);
+  },
+
+  // Keyboard shortcuts forwarded from main process (when webContents has focus)
+  onKeyboardShortcut: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("keyboard-shortcut", listener);
+    return () => ipcRenderer.removeListener("keyboard-shortcut", listener);
+  },
+
+  // Copy text to clipboard (uses electron clipboard, works even when focus is on webview)
+  copyToClipboard: (text) => ipcRenderer.invoke("copy-to-clipboard", text),
 
   // Open Mergado as a tabbed view inside main layout
   openMergadoTab: () => ipcRenderer.invoke("open-mergado-tab"),
+
+  // Open Google (Analytics/Ads) as a tabbed view with pre-set cookies
+  openGoogleTab: (payload) => ipcRenderer.invoke("open-google-tab", payload),
+
   // Overlay show/hide (to keep React modals above native WebContentsViews)
   overlayOpen: () => ipcRenderer.invoke("overlay-open"),
   overlayClose: () => ipcRenderer.invoke("overlay-close"),

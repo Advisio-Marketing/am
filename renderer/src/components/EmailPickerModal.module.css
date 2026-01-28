@@ -1,0 +1,110 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal {
+  width: min(520px, 92vw);
+  background: #20394a;
+  border: none;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  padding: 18px 16px 16px;
+  position: relative;
+  color: #fff;
+}
+
+.title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.emailButton {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-radius: 8px;
+  padding: 12px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.emailButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.emailButton:focus {
+  outline: none;
+}
+
+.emailButton.selected,
+.emailButton:focus-visible {
+  background: rgba(255, 255, 255, 0.15);
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 1px;
+}
+
+.emailButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.emailText {
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.badgeDisabled {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.closeIcon {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 20px;
+  line-height: 1;
+  padding: 6px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.closeIcon:hover {
+  opacity: 1;
+}
+
+.closeIcon:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  opacity: 0.6;
+  text-align: center;
+}

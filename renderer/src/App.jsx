@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import LoginScreen from "./components/LoginScreen";
 import AccountButton from "./components/AccountButton";
 import StyledButton from "./components/StyledButton";
@@ -7,6 +7,9 @@ import TabBar from "./components/TabBar";
 import ContentPlaceholder from "./components/ContentPlaceholder";
 import HomeTab from "./components/HomeTab";
 import NewTabModal from "./components/NewTabModal";
+import MessageModal from "./components/MessageModal";
+import EmailPickerModal from "./components/EmailPickerModal";
+import GoogleServicePickerModal from "./components/GoogleServicePickerModal";
 import "./assets/App.css";
 
 const DEFAULT_SIDEBAR_WIDTH = 250;
@@ -34,12 +37,352 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showNewTabModal, setShowNewTabModal] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
+  const [messageModal, setMessageModal] = useState(null);
+  const [showGoogleEmailPicker, setShowGoogleEmailPicker] = useState(false);
+  // Google credentials data (cookies, email, userAgent) after fetching from API
+  const [googleCredentials, setGoogleCredentials] = useState(null);
   // Track tabs that were detached into their own window so we don't show them again in TabBar
   const [detachedTabIds, setDetachedTabIds] = useState(() => new Set());
+  // Find in page state
+  const [showFindInPage, setShowFindInPage] = useState(false);
+  // Trigger counter for find input focus
+  const [findFocusTrigger, setFindFocusTrigger] = useState(0);
+  // Trigger counters for keyboard shortcut actions (to show visual feedback in TabBar)
+  const [copyUrlTrigger, setCopyUrlTrigger] = useState(0);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Refs for current values (to avoid stale closures in keyboard handlers)
+  const openTabsRef = useRef(openTabs);
+  const activeTabIdRef = useRef(activeTabId);
+  const canGoBackRef = useRef(canGoBack);
+  useEffect(() => {
+    openTabsRef.current = openTabs;
+    activeTabIdRef.current = activeTabId;
+    canGoBackRef.current = canGoBack;
+  }, [openTabs, activeTabId, canGoBack]);
 
   const [prevSidebarWidth, setPrevSidebarWidth] = useState(
-    DEFAULT_SIDEBAR_WIDTH
+    DEFAULT_SIDEBAR_WIDTH,
   );
+
+  // Detect platform
+  const isMac =
+    typeof navigator !== "undefined" &&
+    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+
+  // Keyboard shortcuts for TabBar actions
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Use refs for current values to avoid stale closures
+      const currentTabs = openTabsRef.current;
+      const currentActiveTabId = activeTabIdRef.current;
+      const currentCanGoBack = canGoBackRef.current;
+
+      const activeTab = currentTabs.find((t) => t.id === currentActiveTabId);
+      const isAccountTab = activeTab && activeTab.kind === "account";
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+
+      console.log(
+        "[Shortcut] Key pressed:",
+        e.key,
+        "modifier:",
+        modifier,
+        "alt:",
+        e.altKey,
+        "shift:",
+        e.shiftKey,
+      );
+
+      // Ctrl+F / Cmd+F - Find in page (always open and focus, close if already open)
+      if (modifier && e.key === "f") {
+        e.preventDefault();
+        console.log("[Shortcut] Cmd+F detected, isAccountTab:", isAccountTab);
+        if (isAccountTab) {
+          setShowFindInPage((prev) => {
+            if (!prev) {
+              // Opening - trigger focus
+              setFindFocusTrigger((t) => t + 1);
+            }
+            return !prev;
+          });
+        }
+        return;
+      }
+
+      // Ctrl+R / Cmd+R - Refresh (only for account tabs)
+      if (modifier && e.key === "r") {
+        e.preventDefault();
+        if (isAccountTab && currentActiveTabId) {
+          api?.reloadTab?.(currentActiveTabId);
+          setRefreshTrigger((t) => t + 1);
+        }
+        return;
+      }
+
+      // Ctrl+Backspace / Cmd+Backspace - Go back
+      if (modifier && e.key === "Backspace") {
+        e.preventDefault();
+        if (isAccountTab && currentCanGoBack) {
+          api?.goBack?.(currentActiveTabId);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+C / Cmd+Shift+C - Copy URL
+      if (modifier && e.shiftKey && e.key === "c") {
+        e.preventDefault();
+        if (isAccountTab && currentActiveTabId) {
+          setCopyUrlTrigger((t) => t + 1);
+        }
+        return;
+      }
+
+      // Ctrl+T / Cmd+T - New tab
+      if (modifier && e.key === "t") {
+        e.preventDefault();
+        api?.overlayOpen?.();
+        setShowNewTabModal(true);
+        return;
+      }
+
+      // Option+H / Alt+H - Go home (use code for Mac compatibility)
+      if (e.altKey && (e.key === "h" || e.code === "KeyH")) {
+        e.preventDefault();
+        setOpenTabs([]);
+        setActiveTabId(null);
+        setViewMode("initial");
+        setDetachedTabIds(new Set());
+        api?.resetToHome?.();
+        return;
+      }
+
+      // Cmd+Shift+[ (BracketLeft) or Ctrl+Shift+Tab or Cmd/Ctrl+Left - Switch to previous tab
+      if (
+        (modifier &&
+          e.shiftKey &&
+          (e.key === "[" || e.code === "BracketLeft")) ||
+        (e.ctrlKey && e.shiftKey && e.key === "Tab") ||
+        (modifier && e.key === "ArrowLeft")
+      ) {
+        e.preventDefault();
+        if (currentTabs.length > 1 && currentActiveTabId) {
+          const currentIndex = currentTabs.findIndex(
+            (t) => t.id === currentActiveTabId,
+          );
+          if (currentIndex > 0) {
+            const prevTabId = currentTabs[currentIndex - 1].id;
+            const target = currentTabs[currentIndex - 1];
+            if (target.kind !== "account") {
+              api?.switchTab?.(null);
+              setActiveTabId(prevTabId);
+              setCanGoBack(false);
+            } else {
+              api?.switchTab?.(prevTabId).then((result) => {
+                if (result?.success) {
+                  setActiveTabId(prevTabId);
+                  api?.canGoBack?.(prevTabId).then((res) => {
+                    setCanGoBack(!!res?.canGoBack);
+                  });
+                }
+              });
+            }
+          }
+        }
+        return;
+      }
+
+      // Cmd+Shift+] (BracketRight) or Ctrl+Tab or Cmd/Ctrl+Right - Switch to next tab
+      if (
+        (modifier &&
+          e.shiftKey &&
+          (e.key === "]" || e.code === "BracketRight")) ||
+        (e.ctrlKey && !e.shiftKey && e.key === "Tab") ||
+        (modifier && e.key === "ArrowRight")
+      ) {
+        e.preventDefault();
+        if (currentTabs.length > 1 && currentActiveTabId) {
+          const currentIndex = currentTabs.findIndex(
+            (t) => t.id === currentActiveTabId,
+          );
+          if (currentIndex < currentTabs.length - 1) {
+            const nextTabId = currentTabs[currentIndex + 1].id;
+            const target = currentTabs[currentIndex + 1];
+            if (target.kind !== "account") {
+              api?.switchTab?.(null);
+              setActiveTabId(nextTabId);
+              setCanGoBack(false);
+            } else {
+              api?.switchTab?.(nextTabId).then((result) => {
+                if (result?.success) {
+                  setActiveTabId(nextTabId);
+                  api?.canGoBack?.(nextTabId).then((res) => {
+                    setCanGoBack(!!res?.canGoBack);
+                  });
+                }
+              });
+            }
+          }
+        }
+        return;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [api, isMac]);
+
+  // Listen for keyboard shortcuts forwarded from main process (when webContents has focus)
+  useEffect(() => {
+    if (!api?.onKeyboardShortcut) return;
+
+    const handleShortcut = ({ action }) => {
+      // Use refs for current values to avoid stale closures
+      const currentTabs = openTabsRef.current;
+      const currentActiveTabId = activeTabIdRef.current;
+      const currentCanGoBack = canGoBackRef.current;
+
+      const activeTab = currentTabs.find((t) => t.id === currentActiveTabId);
+      const isAccountTab = activeTab && activeTab.kind === "account";
+
+      log.info(
+        "[IPC Shortcut] Received action:",
+        action,
+        "activeTabId:",
+        currentActiveTabId,
+        "tabs:",
+        currentTabs.length,
+        "isAccountTab:",
+        isAccountTab,
+      );
+
+      switch (action) {
+        case "find":
+          if (isAccountTab) {
+            setShowFindInPage((prev) => {
+              if (!prev) {
+                setFindFocusTrigger((t) => t + 1);
+              }
+              return !prev;
+            });
+          }
+          break;
+        case "refresh":
+          if (isAccountTab && currentActiveTabId) {
+            api?.refreshActiveTab?.(currentActiveTabId);
+            setRefreshTrigger((t) => t + 1);
+          }
+          break;
+        case "back":
+          if (isAccountTab && currentCanGoBack) {
+            api?.goBack?.(currentActiveTabId);
+          }
+          break;
+        case "copyUrl":
+          if (isAccountTab && currentActiveTabId) {
+            setCopyUrlTrigger((t) => t + 1);
+          }
+          break;
+        case "newTab":
+          api?.overlayOpen?.();
+          setShowNewTabModal(true);
+          break;
+        case "home":
+          setOpenTabs([]);
+          setActiveTabId(null);
+          setViewMode("initial");
+          setDetachedTabIds(new Set());
+          api?.resetToHome?.();
+          break;
+        case "prevTab":
+          log.info(
+            "[IPC Shortcut] prevTab - currentTabs:",
+            currentTabs.length,
+            "currentActiveTabId:",
+            currentActiveTabId,
+          );
+          if (currentTabs.length > 1 && currentActiveTabId) {
+            const currentIndex = currentTabs.findIndex(
+              (t) => t.id === currentActiveTabId,
+            );
+            log.info("[IPC Shortcut] prevTab - currentIndex:", currentIndex);
+            if (currentIndex > 0) {
+              const prevTabId = currentTabs[currentIndex - 1].id;
+              const target = currentTabs[currentIndex - 1];
+              log.info(
+                "[IPC Shortcut] prevTab - switching to:",
+                prevTabId,
+                "kind:",
+                target.kind,
+              );
+              if (target.kind !== "account") {
+                api?.switchTab?.(null);
+                setActiveTabId(prevTabId);
+                setCanGoBack(false);
+              } else {
+                api?.switchTab?.(prevTabId).then((result) => {
+                  log.info(
+                    "[IPC Shortcut] prevTab - switchTab result:",
+                    result,
+                  );
+                  if (result?.success) {
+                    setActiveTabId(prevTabId);
+                    api?.canGoBack?.(prevTabId).then((res) => {
+                      setCanGoBack(!!res?.canGoBack);
+                    });
+                  }
+                });
+              }
+            }
+          }
+          break;
+        case "nextTab":
+          log.info(
+            "[IPC Shortcut] nextTab - currentTabs:",
+            currentTabs.length,
+            "currentActiveTabId:",
+            currentActiveTabId,
+          );
+          if (currentTabs.length > 1 && currentActiveTabId) {
+            const currentIndex = currentTabs.findIndex(
+              (t) => t.id === currentActiveTabId,
+            );
+            log.info("[IPC Shortcut] nextTab - currentIndex:", currentIndex);
+            if (currentIndex < currentTabs.length - 1) {
+              const nextTabId = currentTabs[currentIndex + 1].id;
+              const target = currentTabs[currentIndex + 1];
+              log.info(
+                "[IPC Shortcut] nextTab - switching to:",
+                nextTabId,
+                "kind:",
+                target.kind,
+              );
+              if (target.kind !== "account") {
+                api?.switchTab?.(null);
+                setActiveTabId(nextTabId);
+                setCanGoBack(false);
+              } else {
+                api?.switchTab?.(nextTabId).then((result) => {
+                  if (result?.success) {
+                    setActiveTabId(nextTabId);
+                    api?.canGoBack?.(nextTabId).then((res) => {
+                      setCanGoBack(!!res?.canGoBack);
+                    });
+                  }
+                });
+              }
+            }
+          }
+          break;
+        case "closeFindBar":
+          setShowFindInPage(false);
+          break;
+        default:
+          log.warn("[IPC Shortcut] Unknown action:", action);
+      }
+    };
+
+    const remove = api.onKeyboardShortcut(handleShortcut);
+    return () => remove?.();
+  }, [api, log]);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -56,7 +399,7 @@ function App() {
       if (!isSidebarCollapsed) {
         const newWidth = Math.min(
           Math.max(e.clientX, MIN_SIDEBAR_WIDTH),
-          MAX_SIDEBAR_WIDTH
+          MAX_SIDEBAR_WIDTH,
         );
         setSidebarWidth(newWidth);
         api?.updateSidebarWidth?.(newWidth);
@@ -89,13 +432,13 @@ function App() {
   useEffect(() => {
     if (!api?.onTabStatusUpdate) return;
     const removeStatusListener = api.onTabStatusUpdate(
-      ({ tabId, accountId, status, error, name, system }) => {
+      ({ tabId, accountId, status, error, name, system, service }) => {
         const id = tabId || accountId; // backwards compatibility
         // Completely ignore status updates for tabs that are currently detached
         if (id && detachedTabIds.has(id)) return;
         setOpenTabs((currentTabs) => {
           const existingTabIndex = currentTabs.findIndex(
-            (tab) => tab.id === id
+            (tab) => tab.id === id,
           );
           if (existingTabIndex > -1) {
             const newTabs = [...currentTabs];
@@ -104,6 +447,7 @@ function App() {
               status,
               error: error || null,
               ...(system ? { system } : {}),
+              ...(service ? { service } : {}),
               ...(accountId ? { accountId } : {}),
             };
             return newTabs;
@@ -120,6 +464,7 @@ function App() {
                   error: null,
                   kind: "account",
                   system: system || "heureka",
+                  service: service || null,
                 },
               ];
             }
@@ -128,7 +473,7 @@ function App() {
         });
         if (status === "ready" && !activeTabId) {
           const candidate = id;
-          const existsInTabs = openTabs.some((t) => t.id === candidate);
+          const existsInTabs = openTabs.some((tab) => tab.id === candidate);
           if (candidate && existsInTabs && !detachedTabIds.has(candidate)) {
             setActiveTabId(candidate);
           }
@@ -140,7 +485,7 @@ function App() {
             .then((res) => setCanGoBack(!!res?.canGoBack))
             .catch(() => setCanGoBack(false));
         }
-      }
+      },
     );
 
     const removeActivateListener = api.onActivateTab((accountId) => {
@@ -159,7 +504,7 @@ function App() {
 
     const removeForceCloseListener = api.onForceCloseTab((accountId) => {
       setOpenTabs((currentTabs) =>
-        currentTabs.filter((tab) => tab.id !== accountId)
+        currentTabs.filter((tab) => tab.id !== accountId),
       );
       // Mark this id as detached so title/activate events are ignored until reattach
       setDetachedTabIds((prev) => {
@@ -176,8 +521,8 @@ function App() {
         currentTabs.map((tab) =>
           tab.id === tabId
             ? { ...tab, title: title && title.length ? title : tab.name }
-            : tab
-        )
+            : tab,
+        ),
       );
     });
 
@@ -195,7 +540,7 @@ function App() {
       setUserInfo(userInfo);
       setViewMode("initial");
     },
-    [log]
+    [log],
   );
 
   // Otevření Mergada jako nový tab (account-like)
@@ -224,6 +569,179 @@ function App() {
       log.error("Open Mergado failed:", e);
     }
   }, [api, log]);
+
+  const openMessageModal = useCallback(
+    async ({ title, message, details }) => {
+      setMessageModal({ title: title || "", message, details: details || "" });
+      // Ensure native views are hidden when a modal is shown
+      try {
+        await api?.overlayOpen?.();
+      } catch (_) {
+        // ignore
+      }
+    },
+    [api],
+  );
+
+  const closeMessageModal = useCallback(async () => {
+    setMessageModal(null);
+    try {
+      await api?.overlayClose?.();
+    } catch (_) {
+      // ignore
+    }
+  }, [api]);
+
+  const closeGoogleEmailPicker = useCallback(async () => {
+    setShowGoogleEmailPicker(false);
+    try {
+      await api?.overlayClose?.();
+    } catch (_) {
+      // ignore
+    }
+  }, [api]);
+
+  const closeGoogleServicePicker = useCallback(async () => {
+    setGoogleCredentials(null);
+    try {
+      await api?.overlayClose?.();
+    } catch (_) {
+      // ignore
+    }
+  }, [api]);
+
+  // Go back from GoogleServicePicker to EmailPicker
+  const backToEmailPicker = useCallback(() => {
+    setGoogleCredentials(null);
+    setShowGoogleEmailPicker(true);
+  }, []);
+
+  // Go back from EmailPicker to NewTabModal
+  const backToNewTabModal = useCallback(() => {
+    setShowGoogleEmailPicker(false);
+    setShowNewTabModal(true);
+  }, []);
+
+  // Fetch Google credentials and show service picker if successful
+  const runGoogleCredentialsRequest = useCallback(
+    async (email) => {
+      try {
+        if (!api?.fetchGoogleCredentials) {
+          await openMessageModal({
+            title: "Google credentials",
+            message:
+              "electronAPI.fetchGoogleCredentials není dostupné. To obvykle znamená, že Electron neběží s aktuálním preloadem — restartni `npm run dev` (ukončit oba procesy a spustit znovu).",
+          });
+          return;
+        }
+        const res = await api.fetchGoogleCredentials(email);
+        if (!res) {
+          await openMessageModal({
+            title: "Google credentials",
+            message: "Žádná odpověď z main procesu (IPC).",
+          });
+          return;
+        }
+
+        if (!res?.success) {
+          // Show error in modal
+          const detailsParts = [];
+          detailsParts.push(`Email: ${email}`);
+          if (res?.debug) {
+            detailsParts.push(
+              "Debug attempts:\n" + JSON.stringify(res.debug, null, 2),
+            );
+          }
+          const details = detailsParts.filter(Boolean).join("\n\n");
+          await openMessageModal({
+            title: "Google credentials",
+            message: res?.error || "Request failed",
+            details,
+          });
+          return;
+        }
+
+        // Success – store credentials and show service picker
+        const apiData = res.data?.data || res.data;
+        setGoogleCredentials({
+          email: apiData?.email || email,
+          cookies: apiData?.cookies || {},
+          userAgent: apiData?.user_agent || null,
+        });
+        // Keep overlay open for service picker modal
+      } catch (err) {
+        log.error("Google credentials fetch failed:", err);
+        await openMessageModal({
+          title: "Google credentials",
+          message: err?.message || String(err),
+        });
+      }
+    },
+    [api, log, openMessageModal],
+  );
+
+  // Open a Google service tab (Analytics or Ads)
+  const openGoogleServiceTab = useCallback(
+    async (service) => {
+      if (!googleCredentials) {
+        return;
+      }
+
+      try {
+        // Close service picker
+        setGoogleCredentials(null);
+
+        // Show main layout if not already active
+        await api?.showMainLayout?.();
+        setViewMode("main");
+
+        // Call IPC to open the tab
+        const res = await api?.openGoogleTab?.({
+          service,
+          email: googleCredentials.email,
+          cookies: googleCredentials.cookies,
+          userAgent: googleCredentials.userAgent,
+        });
+
+        if (!res?.success) {
+          throw new Error(res?.error || "Nepodařilo se otevřít Google tab.");
+        }
+
+        const { id, name } = res;
+
+        // Add tab to state
+        setOpenTabs((prev) => {
+          if (prev.some((t) => t.id === id)) return prev;
+          return [
+            ...prev,
+            {
+              id,
+              name: name || `Google ${service}`,
+              title: name || `Google ${service}`,
+              status: "loading",
+              kind: "account",
+              system: "google",
+              service,
+            },
+          ];
+        });
+        setActiveTabId(id);
+
+        try {
+          await api?.overlayClose?.();
+        } catch (_) {
+          // ignore
+        }
+      } catch (err) {
+        log.error("Open Google tab failed:", err);
+        await openMessageModal({
+          title: "Google",
+          message: err?.message || String(err),
+        });
+      }
+    },
+    [api, log, googleCredentials, openMessageModal],
+  );
 
   const handleInitialButtonClick = useCallback(
     async (accountName) => {
@@ -280,9 +798,16 @@ function App() {
         } catch (err) {
           log.error("Mergado open failed:", err);
         }
+      } else if (accountName === "Google") {
+        setShowGoogleEmailPicker(true);
+        try {
+          await api?.overlayOpen?.();
+        } catch (_) {
+          // ignore
+        }
       }
     },
-    [sidebarWidth, handleOpenMergado, api, log]
+    [sidebarWidth, handleOpenMergado, api],
   );
 
   const handleToggleCollapse = useCallback(() => {
@@ -305,6 +830,8 @@ function App() {
   const handleSwitchTab = useCallback(
     async (tabId) => {
       if (activeTabId === tabId) return;
+      // Close find in page when switching tabs
+      setShowFindInPage(false);
       const target = openTabs.find((t) => t.id === tabId);
       if (!target) return;
       // For non-account tabs (home/hub), hide native views in main process
@@ -326,7 +853,7 @@ function App() {
         }
       }
     },
-    [activeTabId, openTabs, api]
+    [activeTabId, openTabs, api],
   );
 
   const handleSidebarSelect = useCallback(
@@ -334,7 +861,7 @@ function App() {
       const activeTab = openTabs.find((t) => t.id === activeTabId);
       const isPlaceholder = activeTab ? activeTab.kind !== "account" : false;
       const newTabId = `${account.id}-${Date.now()}-${Math.floor(
-        Math.random() * 1e6
+        Math.random() * 1e6,
       )}`;
 
       if (isPlaceholder) {
@@ -382,11 +909,11 @@ function App() {
       if (!result?.success) {
         log.error(
           `Failed to initiate select for ${account.id}:`,
-          result?.error
+          result?.error,
         );
       }
     },
-    [openTabs, activeTabId, api, log]
+    [openTabs, activeTabId, api, log],
   );
 
   const handleCloseTab = useCallback(
@@ -421,12 +948,12 @@ function App() {
         if (!result.success) {
           log.error(
             `Failed to close tab ${tabId} in main process:`,
-            result.error
+            result.error,
           );
         }
       }
     },
-    [activeTabId, openTabs, api, log]
+    [activeTabId, openTabs, api, log],
   );
 
   const handleReorderTabs = useCallback(
@@ -441,7 +968,7 @@ function App() {
         return arr;
       });
     },
-    [openTabs]
+    [openTabs],
   );
 
   // Detach an account tab into a separate window: remove it from state and track as detached
@@ -477,7 +1004,7 @@ function App() {
         log.error("detachTab failed:", e);
       }
     },
-    [openTabs, activeTabId, api, log]
+    [openTabs, activeTabId, api, log],
   );
 
   const handleLogout = useCallback(async () => {
@@ -504,7 +1031,7 @@ function App() {
     if (!api?.onAuthExpired) return;
     const remove = api.onAuthExpired((_payload) => {
       log.warn(
-        "Auth expired notification received. Returning to login screen."
+        "Auth expired notification received. Returning to login screen.",
       );
       // Don't call googleLogout here; main already revoked/cleared. Just reset UI state.
       setUserInfo(null);
@@ -531,8 +1058,8 @@ function App() {
       if (!target || target.kind !== "account") return;
       setOpenTabs((currentTabs) =>
         currentTabs.map((tab) =>
-          tab.id === tabId ? { ...tab, status: "loading", error: null } : tab
-        )
+          tab.id === tabId ? { ...tab, status: "loading", error: null } : tab,
+        ),
       );
       log.info(`Requesting refresh for tab: ${tabId}`);
       try {
@@ -548,12 +1075,12 @@ function App() {
           currentTabs.map((tab) =>
             tab.id === tabId
               ? { ...tab, status: "error", error: String(error) }
-              : tab
-          )
+              : tab,
+          ),
         );
       }
     },
-    [openTabs, api, log]
+    [openTabs, api, log],
   );
 
   // Update canGoBack on navigation events for active tab: listen to status updates and poll canGoBack
@@ -671,6 +1198,12 @@ function App() {
     }
   }, [api, log, sidebarWidth, handleOpenMergado]);
 
+  const handlePickNewGoogle = useCallback(async () => {
+    setShowNewTabModal(false);
+    // Keep overlay open for Google email picker modal
+    setShowGoogleEmailPicker(true);
+  }, []);
+
   // Skupinové zobrazení účtů podle e-mailu: víc účtů pod jedním e-mailem -> jeden řádek s e-mailem
   const displayAccounts = React.useMemo(() => {
     const emailMap = new Map();
@@ -692,20 +1225,20 @@ function App() {
             else acc.other.push(a);
             return acc;
           },
-          { cz: [], sk: [], other: [] }
+          { cz: [], sk: [], other: [] },
         );
 
         const pushGroup = (subset, suffixLabel) => {
           if (!subset.length) return;
           const representative = [...subset].sort(
-            (a, b) => Number(a.id) - Number(b.id)
+            (a, b) => Number(a.id) - Number(b.id),
           )[0];
           const tooltipNames = subset
             .map(
               (a) =>
                 `${a.name || `Účet ${a.id}`}${
                   a.client_country ? ` (${a.client_country})` : ""
-                }`
+                }`,
             )
             .join(", ");
           items.push({
@@ -745,7 +1278,7 @@ function App() {
       if (item.group) {
         const emailHit = item.name.toLowerCase().includes(term);
         const namesHit = item.groupAccounts?.some((a) =>
-          (a.name || "").toLowerCase().includes(term)
+          (a.name || "").toLowerCase().includes(term),
         );
         return emailHit || namesHit;
       }
@@ -761,77 +1294,122 @@ function App() {
   };
 
   if (viewMode === "login") {
-    return <LoginScreen onLogin={handleGoogleLogin} />;
+    return (
+      <>
+        <LoginScreen onLogin={handleGoogleLogin} />
+        {messageModal ? (
+          <MessageModal
+            title={messageModal.title}
+            message={messageModal.message}
+            details={messageModal.details}
+            onClose={closeMessageModal}
+          />
+        ) : null}
+      </>
+    );
   }
 
   if (viewMode === "initial") {
     return (
-      <div
-        className={`app-container-initial ${
-          viewMode === "initial" ? "with-back-img" : null
-        }`}
-      >
-        <div className="initial-header">
-          {userInfo && (
-            <div className="user-info">
-              <span className="user-name">
-                {userInfo.name} ({userInfo.email})
-              </span>
-              <StyledButton
-                onClick={handleLogout}
-                variant="danger"
-                title="Odhlásit se"
+      <>
+        <div
+          className={`app-container-initial ${
+            viewMode === "initial" ? "with-back-img" : null
+          }`}
+        >
+          <div className="initial-header">
+            {userInfo && (
+              <div className="user-info">
+                <span className="user-name">
+                  {userInfo.name} ({userInfo.email})
+                </span>
+                <StyledButton
+                  onClick={handleLogout}
+                  variant="danger"
+                  title="Odhlásit se"
+                >
+                  Odhlásit
+                </StyledButton>
+              </div>
+            )}
+          </div>
+
+          {errorLoadingAccounts && (
+            <div style={{ color: "red", textAlign: "center" }}>
+              <p>Chyba při načítání seznamu účtů:</p>
+              <p>{errorLoadingAccounts}</p>
+              {/* <button
+                onClick={() => handleInitialButtonClick("Heureka")}
+                style={{ marginTop: "10px" }}
               >
-                Odhlásit
-              </StyledButton>
+                Zkusit znovu?
+              </button> */}
+            </div>
+          )}
+          {!errorLoadingAccounts && (
+            <div className="initial-btn-box">
+              <AccountButton
+                accountName="Heureka"
+                onClick={handleInitialButtonClick}
+                disabled={isLoadingAccounts}
+                loading={isLoadingAccounts}
+              />
+              <AccountButton
+                accountName="Mergado"
+                onClick={handleInitialButtonClick}
+                disabled={isLoadingAccounts}
+                loading={isLoadingAccounts}
+              />
+              <AccountButton
+                accountName="Google"
+                onClick={handleInitialButtonClick}
+                disabled={false}
+              />
+              <AccountButton
+                accountName="Favi"
+                onClick={handleDisabled}
+                disabled={true}
+              />
+              <AccountButton
+                accountName="Biano"
+                onClick={handleDisabled}
+                disabled={true}
+              />
             </div>
           )}
         </div>
-
-        {errorLoadingAccounts && (
-          <div style={{ color: "red", textAlign: "center" }}>
-            <p>Chyba při načítání seznamu účtů:</p>
-            <p>{errorLoadingAccounts}</p>
-            {/* <button
-              onClick={() => handleInitialButtonClick("Heureka")}
-              style={{ marginTop: "10px" }}
-            >
-              Zkusit znovu?
-            </button> */}
-          </div>
-        )}
-        {!errorLoadingAccounts && (
-          <div className="initial-btn-box">
-            <AccountButton
-              accountName="Heureka"
-              onClick={handleInitialButtonClick}
-              disabled={isLoadingAccounts}
-              loading={isLoadingAccounts}
-            />
-            <AccountButton
-              accountName="Mergado"
-              onClick={handleInitialButtonClick}
-              disabled={isLoadingAccounts}
-              loading={isLoadingAccounts}
-            />
-            <AccountButton
-              accountName="Glami"
-              onClick={handleDisabled}
-              disabled={true}
-            />
-            <AccountButton
-              accountName="Favi"
-              onClick={handleDisabled}
-              disabled={true}
-            />
-            <AccountButton
-              accountName="Biano"
-              onClick={handleDisabled}
-              disabled={true}
-            />
-          </div>
-        )}
-      </div>
+        {messageModal ? (
+          <MessageModal
+            title={messageModal.title}
+            message={messageModal.message}
+            details={messageModal.details}
+            onClose={closeMessageModal}
+          />
+        ) : null}
+        {showGoogleEmailPicker ? (
+          <EmailPickerModal
+            title="Vyber e-mail pro Google"
+            emails={["ppc@advisio.cz", "sales@advisio.cz"]}
+            disabledEmails={["sales@advisio.cz"]}
+            onClose={closeGoogleEmailPicker}
+            onPick={async (email) => {
+              await closeGoogleEmailPicker();
+              await runGoogleCredentialsRequest(email);
+            }}
+          />
+        ) : null}
+        {googleCredentials ? (
+          <GoogleServicePickerModal
+            title="Vyber službu"
+            email={googleCredentials.email}
+            onPickAnalytics={() => openGoogleServiceTab("analytics")}
+            onPickAds={() => openGoogleServiceTab("ads")}
+            onPickMerchant={() => openGoogleServiceTab("merchant")}
+            onClose={closeGoogleServicePicker}
+            disabledServices={[]}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -839,127 +1417,136 @@ function App() {
   const showSidebar = activeTabInfo?.system === "heureka";
 
   return (
-    <div className={`app-container-main ${isResizing ? "resizing" : ""}`}>
-      <TabBar
-        tabs={openTabs}
-        activeTabId={activeTabId}
-        onSwitchTab={handleSwitchTab}
-        onCloseTab={handleCloseTab}
-        height={TAB_BAR_HEIGHT}
-        onReorderTabs={handleReorderTabs}
-        onGoHome={handleGoHome}
-        onToggleCollapse={handleToggleCollapse}
-        isSidebarCollapsed={isSidebarCollapsed}
-        onRefresh={handleRefresh}
-        onNewHomeTab={handleNewHomeTab}
-        onBack={handleBack}
-        canGoBack={canGoBack}
-        onDetachTab={handleDetachTab}
-      />
-      <div className="main-row">
-        {showSidebar && (
-          <Sidebar
-            accounts={displayAccounts}
-            onSelect={handleSidebarSelect}
-            width={sidebarWidth}
-            isLoading={isLoadingAccounts}
-            error={errorLoadingAccounts}
-            searchTerm={searchTerm}
-            onSearchChange={handleSearchChange}
-            selectedAccountId={activeTabInfo?.accountId || null}
-            onGoHome={handleGoHome}
-            isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={handleToggleCollapse}
-            onStartResize={handleStartResize}
-            isResizing={isResizing}
-            onRefresh={handleRefresh}
-          />
-        )}
-        <div className={`main-content-wrapper ${isResizing ? "resizing" : ""}`}>
-          {activeTabInfo?.kind === "home" ? (
-            <HomeTab
-              userInfo={userInfo}
-              onHeureka={async () => {
-                // Replace current home tab with Heureka hub (keeps same position and id)
-                const beforeId = activeTabInfo.id;
-                await api?.showMainLayout?.();
-                api?.updateSidebarWidth?.(sidebarWidth);
-                setOpenTabs((prev) => {
-                  const idx = prev.findIndex((t) => t.id === beforeId);
-                  if (idx === -1) return prev;
-                  const next = [...prev];
-                  next[idx] = {
-                    id: beforeId,
-                    name: "Heureka",
-                    title: "Heureka",
-                    kind: "hub",
-                    system: "heureka",
-                    status: "ready",
-                  };
-                  return next;
-                });
-                setActiveTabId(beforeId);
-                // Hide native views when switching to Heureka hub
-                await api?.switchTab?.(null);
-                // If accounts are not loaded yet, fetch them so the sidebar shows immediately
-                if (!accounts?.length) {
-                  setIsLoadingAccounts(true);
-                  setErrorLoadingAccounts(null);
-                  try {
-                    const list = await api?.fetchAccountListHeureka?.();
-                    if (Array.isArray(list)) {
-                      const formattedList = list.map((item) => ({
-                        id: String(item.id),
-                        name: item.client_name || `Účet ${item.id}`,
-                        client_country: item?.client_country,
-                        client_email: item?.client_email || "",
-                      }));
-                      setAccounts(formattedList);
-                    }
-                  } catch (e) {
-                    setErrorLoadingAccounts(String(e?.message || e));
-                  } finally {
-                    setIsLoadingAccounts(false);
-                  }
-                }
-              }}
-              onMergado={async () => {
-                // Replace current home tab at same position with Mergado tab
-                const beforeId = activeTabInfo.id;
-                try {
-                  const res = await api?.openMergadoTab?.();
-                  if (!res?.success)
-                    throw new Error(
-                      res?.error || "Nepodařilo se otevřít Mergado."
-                    );
-                  const { id, name } = res;
+    <>
+      <div className={`app-container-main ${isResizing ? "resizing" : ""}`}>
+        <TabBar
+          tabs={openTabs}
+          activeTabId={activeTabId}
+          onSwitchTab={handleSwitchTab}
+          onCloseTab={handleCloseTab}
+          height={TAB_BAR_HEIGHT}
+          onReorderTabs={handleReorderTabs}
+          onGoHome={handleGoHome}
+          onToggleCollapse={handleToggleCollapse}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onRefresh={handleRefresh}
+          onNewHomeTab={handleNewHomeTab}
+          onBack={handleBack}
+          canGoBack={canGoBack}
+          onDetachTab={handleDetachTab}
+          showFind={showFindInPage}
+          onToggleFind={setShowFindInPage}
+          findFocusTrigger={findFocusTrigger}
+          copyUrlTrigger={copyUrlTrigger}
+          refreshTrigger={refreshTrigger}
+        />
+        <div className="main-row">
+          {showSidebar && (
+            <Sidebar
+              accounts={displayAccounts}
+              onSelect={handleSidebarSelect}
+              width={sidebarWidth}
+              isLoading={isLoadingAccounts}
+              error={errorLoadingAccounts}
+              searchTerm={searchTerm}
+              onSearchChange={handleSearchChange}
+              selectedAccountId={activeTabInfo?.accountId || null}
+              onGoHome={handleGoHome}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={handleToggleCollapse}
+              onStartResize={handleStartResize}
+              isResizing={isResizing}
+              onRefresh={handleRefresh}
+            />
+          )}
+          <div
+            className={`main-content-wrapper ${isResizing ? "resizing" : ""}`}
+          >
+            {activeTabInfo?.kind === "home" ? (
+              <HomeTab
+                userInfo={userInfo}
+                onHeureka={async () => {
+                  // Replace current home tab with Heureka hub (keeps same position and id)
+                  const beforeId = activeTabInfo.id;
+                  await api?.showMainLayout?.();
+                  api?.updateSidebarWidth?.(sidebarWidth);
                   setOpenTabs((prev) => {
                     const idx = prev.findIndex((t) => t.id === beforeId);
                     if (idx === -1) return prev;
-                    const withoutDup = prev.filter(
-                      (t) => t.id !== id && t.id !== beforeId
-                    );
-                    const next = [...withoutDup];
-                    next.splice(idx, 0, {
-                      id,
-                      name: name || "Mergado",
-                      title: "Mergado",
-                      status: "loading",
-                      kind: "account",
-                      system: "mergado",
-                    });
+                    const next = [...prev];
+                    next[idx] = {
+                      id: beforeId,
+                      name: "Heureka",
+                      title: "Heureka",
+                      kind: "hub",
+                      system: "heureka",
+                      status: "ready",
+                    };
                     return next;
                   });
-                  setActiveTabId(id);
-                } catch (e) {
-                  log.error("Open Mergado in-place failed:", e);
-                }
-              }}
-              isLoading={isLoadingAccounts}
-            />
-          ) : (
-            <ContentPlaceholder activeTab={activeTabInfo} />
-          )}
+                  setActiveTabId(beforeId);
+                  // Hide native views when switching to Heureka hub
+                  await api?.switchTab?.(null);
+                  // If accounts are not loaded yet, fetch them so the sidebar shows immediately
+                  if (!accounts?.length) {
+                    setIsLoadingAccounts(true);
+                    setErrorLoadingAccounts(null);
+                    try {
+                      const list = await api?.fetchAccountListHeureka?.();
+                      if (Array.isArray(list)) {
+                        const formattedList = list.map((item) => ({
+                          id: String(item.id),
+                          name: item.client_name || `Účet ${item.id}`,
+                          client_country: item?.client_country,
+                          client_email: item?.client_email || "",
+                        }));
+                        setAccounts(formattedList);
+                      }
+                    } catch (e) {
+                      setErrorLoadingAccounts(String(e?.message || e));
+                    } finally {
+                      setIsLoadingAccounts(false);
+                    }
+                  }
+                }}
+                onMergado={async () => {
+                  // Replace current home tab at same position with Mergado tab
+                  const beforeId = activeTabInfo.id;
+                  try {
+                    const res = await api?.openMergadoTab?.();
+                    if (!res?.success)
+                      throw new Error(
+                        res?.error || "Nepodařilo se otevřít Mergado.",
+                      );
+                    const { id, name } = res;
+                    setOpenTabs((prev) => {
+                      const idx = prev.findIndex((t) => t.id === beforeId);
+                      if (idx === -1) return prev;
+                      const withoutDup = prev.filter(
+                        (t) => t.id !== id && t.id !== beforeId,
+                      );
+                      const next = [...withoutDup];
+                      next.splice(idx, 0, {
+                        id,
+                        name: name || "Mergado",
+                        title: "Mergado",
+                        status: "loading",
+                        kind: "account",
+                        system: "mergado",
+                      });
+                      return next;
+                    });
+                    setActiveTabId(id);
+                  } catch (e) {
+                    log.error("Open Mergado in-place failed:", e);
+                  }
+                }}
+                isLoading={isLoadingAccounts}
+              />
+            ) : (
+              <ContentPlaceholder activeTab={activeTabInfo} />
+            )}
+          </div>
         </div>
       </div>
       {showNewTabModal && (
@@ -970,9 +1557,44 @@ function App() {
           }}
           onPickHeureka={handlePickNewHeureka}
           onPickMergado={handlePickNewMergado}
+          onPickGoogle={handlePickNewGoogle}
         />
       )}
-    </div>
+      {messageModal ? (
+        <MessageModal
+          title={messageModal.title}
+          message={messageModal.message}
+          details={messageModal.details}
+          onClose={closeMessageModal}
+        />
+      ) : null}
+      {showGoogleEmailPicker ? (
+        <EmailPickerModal
+          title="Vyber e-mail pro Google"
+          emails={["ppc@advisio.cz", "sales@advisio.cz"]}
+          disabledEmails={["sales@advisio.cz"]}
+          onClose={closeGoogleEmailPicker}
+          onBack={backToNewTabModal}
+          onPick={async (email) => {
+            // Don't close overlay - keep it open for service picker
+            setShowGoogleEmailPicker(false);
+            await runGoogleCredentialsRequest(email);
+          }}
+        />
+      ) : null}
+      {googleCredentials ? (
+        <GoogleServicePickerModal
+          title="Vyber službu"
+          email={googleCredentials.email}
+          onPickAnalytics={() => openGoogleServiceTab("analytics")}
+          onPickAds={() => openGoogleServiceTab("ads")}
+          onPickMerchant={() => openGoogleServiceTab("merchant")}
+          onClose={closeGoogleServicePicker}
+          onBack={backToEmailPicker}
+          disabledServices={[]}
+        />
+      ) : null}
+    </>
   );
 }
 
